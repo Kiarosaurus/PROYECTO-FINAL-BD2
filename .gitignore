@@ -5,3 +5,9 @@ __pycache__/
 .venv/
 venv/
 .env
+
+# dataset local — no commitear
+data/raw/*.csv
+data/raw/covers/
+data/manifest.json
+data/prep_full.log
