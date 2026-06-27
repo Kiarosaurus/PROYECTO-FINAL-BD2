@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from indices.ports import EqualityPredicate, RangePredicate
+from indices.ports import (
+    EqualityPredicate,
+    KnnPredicate,
+    PredicateKind,
+    RangePredicate,
+    SpatialRangePredicate,
+)
 
 from query.ports import Planner
 from query.plan_types import PlanOp, QueryPlan
@@ -14,6 +20,15 @@ _RANGE_OPS = {
     "<=": dict(low=None, include_low=True, include_high=True),
     ">": dict(high=None, include_low=False, include_high=True),
     ">=": dict(high=None, include_low=True, include_high=True),
+}
+
+# Índice que mejor resuelve cada tipo de búsqueda
+_INDEX_BY_KIND = {
+    PredicateKind.EQUALITY: "hash",
+    PredicateKind.RANGE: "bplus",
+    PredicateKind.KNN: "knn",
+    PredicateKind.SPATIAL_RANGE: "rtree",
+    PredicateKind.TEXT_MATCH: "inverted",
 }
 
 
@@ -35,7 +50,21 @@ class QueryPlanner(Planner):
             raise ValueError(f"operador no soportado: {cond.op}")
         if isinstance(cond, A.Between):
             return RangePredicate(column=cond.column, low=cond.low, high=cond.high)
+        if isinstance(cond, A.KnnCondition):
+            return KnnPredicate(column=cond.column, query=cond.query, k=cond.k)
+        if isinstance(cond, A.SpatialCondition):
+            return SpatialRangePredicate(
+                column=cond.column,
+                min_corner=cond.min_corner,
+                max_corner=cond.max_corner,
+            )
         raise ValueError(f"condición no soportada: {type(cond).__name__}")
+
+    # Elige el índice adecuado para el predicado
+    def _index_type_for(self, predicate: Any):
+        if predicate is None:
+            return None
+        return _INDEX_BY_KIND.get(predicate.kind)
 
     def plan(self, ast: Any, catalog: Any = None) -> QueryPlan:
         if isinstance(ast, A.CreateTable):
@@ -68,11 +97,14 @@ class QueryPlanner(Planner):
                 predicate=self._to_predicate(ast.where),
             )
         if isinstance(ast, A.Select):
+            predicate = self._to_predicate(ast.where)
+            k = predicate.k if isinstance(predicate, KnnPredicate) else ast.limit
             return QueryPlan(
                 op=PlanOp.SELECT,
                 table=ast.table,
                 columns=list(ast.columns),
-                predicate=self._to_predicate(ast.where),
-                k=ast.limit,
+                predicate=predicate,
+                k=k,
+                index_type=self._index_type_for(predicate),
             )
         raise ValueError(f"sentencia no soportada: {type(ast).__name__}")
