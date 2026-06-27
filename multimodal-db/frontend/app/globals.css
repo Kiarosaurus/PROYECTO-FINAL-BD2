@@ -1,0 +1,26 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  background: #0f1117;
+  color: #e6e6e6;
+}
+
+.topbar {
+  padding: 16px 24px;
+  background: #161a22;
+  border-bottom: 1px solid #262c38;
+}
+
+.topbar h1 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.content {
+  padding: 24px;
+}
