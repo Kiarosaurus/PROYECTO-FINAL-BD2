@@ -1,0 +1,85 @@
+services:
+  # Driven adapter de persistencia y comparación de índices nativos
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: multimodal-db-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mmdb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mmdb}
+      POSTGRES_DB: ${POSTGRES_DB:-multimodal}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      # Los init scripts corren solo en el primer arranque con data dir vacío
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mmdb} -d ${POSTGRES_DB:-multimodal}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - mmdb-net
+    restart: unless-stopped
+
+  # Driving adapter FastAPI con el query processor y los multimedia endpoints
+  backend:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    container_name: multimodal-db-backend
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONPATH: /app
+      # Selector de StorageEngine con valor file o postgres
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-file}
+      POSTGRES_DSN: postgresql://${POSTGRES_USER:-mmdb}:${POSTGRES_PASSWORD:-mmdb}@postgres:5432/${POSTGRES_DB:-multimodal}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./core:/app/core
+      - ./indices:/app/indices
+      - ./multimedia:/app/multimedia
+      - ./query:/app/query
+      - ./comparison:/app/comparison
+      - ./service:/app/service
+      - ./api:/app/api
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - mmdb-net
+    restart: unless-stopped
+
+  # Presentation layer Next.js donde vive el patrón MVC
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/frontend.Dockerfile
+    container_name: multimodal-db-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - mmdb-net
+    restart: unless-stopped
+
+networks:
+  mmdb-net:
+    driver: bridge
+
+volumes:
+  pg-data:
