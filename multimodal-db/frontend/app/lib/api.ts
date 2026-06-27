@@ -6,6 +6,11 @@ export interface QueryResult {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+// Arma la URL para descargar un archivo subido
+export function fileUrl(name: string): string {
+  return `${API_URL}/files/${encodeURIComponent(name)}`;
+}
+
 // Manda el SQL al backend y devuelve los resultados
 export async function runQuery(sql: string): Promise<QueryResult> {
   const res = await fetch(`${API_URL}/query`, {
