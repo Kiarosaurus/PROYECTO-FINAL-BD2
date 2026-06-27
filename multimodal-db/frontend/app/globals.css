@@ -67,3 +67,25 @@ body {
 .editor-info {
   color: #9aa4b2;
 }
+
+.results {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.results th,
+.results td {
+  padding: 8px 12px;
+  text-align: left;
+  border: 1px solid #262c38;
+}
+
+.results th {
+  background: #161a22;
+  font-weight: 600;
+}
+
+.results td {
+  font-family: ui-monospace, monospace;
+}

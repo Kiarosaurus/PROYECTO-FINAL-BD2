@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { runQuery, type QueryResult } from "../lib/api";
+import ResultsTable from "./ResultsTable";
 
 export default function QueryEditor() {
   const [sql, setSql] = useState("SELECT * FROM img");
@@ -36,7 +37,12 @@ export default function QueryEditor() {
         {loading ? "Ejecutando..." : "Ejecutar"}
       </button>
       {error && <p className="editor-error">{error}</p>}
-      {result && <p className="editor-info">{result.rows.length} filas</p>}
+      {result && (
+        <>
+          <p className="editor-info">{result.rows.length} filas</p>
+          <ResultsTable result={result} />
+        </>
+      )}
     </section>
   );
 }
