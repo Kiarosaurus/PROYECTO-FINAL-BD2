@@ -1,0 +1,48 @@
+// Punto de entrada
+start: statement ";"?
+
+?statement: create_table
+          | drop_table
+          | create_index
+          | insert
+          | delete
+          | select
+
+create_table: "CREATE"i "TABLE"i NAME "(" column_def ("," column_def)* ")"
+column_def: NAME type_name
+type_name: "INT"i | "FLOAT"i | "TEXT"i | "VARCHAR"i | "VECTOR"i | "BOOL"i
+
+drop_table: "DROP"i "TABLE"i NAME
+
+create_index: "CREATE"i "INDEX"i "ON"i NAME "(" NAME ")" "USING"i NAME
+
+insert: "INSERT"i "INTO"i NAME column_list? "VALUES"i row ("," row)*
+column_list: "(" NAME ("," NAME)* ")"
+row: "(" value ("," value)* ")"
+
+delete: "DELETE"i "FROM"i NAME where_clause?
+
+select: "SELECT"i columns "FROM"i NAME where_clause? limit_clause?
+columns: "*"            -> all_columns
+       | NAME ("," NAME)*
+
+where_clause: "WHERE"i condition
+?condition: comparison
+          | between
+comparison: NAME COMP_OP value
+between: NAME "BETWEEN"i value "AND"i value
+
+limit_clause: "LIMIT"i INT
+
+COMP_OP: "<=" | ">=" | "!=" | "=" | "<" | ">"
+
+?value: SIGNED_NUMBER  -> number
+      | ESCAPED_STRING -> string
+
+NAME: /[a-zA-Z_][a-zA-Z0-9_]*/
+
+%import common.SIGNED_NUMBER
+%import common.ESCAPED_STRING
+%import common.INT
+%import common.WS
+%ignore WS
