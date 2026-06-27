@@ -67,4 +67,12 @@ class QueryPlanner(Planner):
                 table=ast.table,
                 predicate=self._to_predicate(ast.where),
             )
+        if isinstance(ast, A.Select):
+            return QueryPlan(
+                op=PlanOp.SELECT,
+                table=ast.table,
+                columns=list(ast.columns),
+                predicate=self._to_predicate(ast.where),
+                k=ast.limit,
+            )
         raise ValueError(f"sentencia no soportada: {type(ast).__name__}")
