@@ -24,6 +24,8 @@ class QueryPlan:
     op: PlanOp
     table: str
     columns: list[str] = field(default_factory=list)
+    # Tipo de cada columna al crear una tabla
+    column_types: list[str] = field(default_factory=list)
     # Condición para filtrar filas
     predicate: Predicate | None = None
     # Filas a insertar
