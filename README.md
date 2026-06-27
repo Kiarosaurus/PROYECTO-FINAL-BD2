@@ -10,6 +10,10 @@ Interfaces (ABCs) en `multimodal-db/`:
 - `core/metrics.py`: `IOStats` y `OperationResult`.
 - `indices/ports.py`: tipos de `Predicate`.
 - `multimedia/ports/`: `FeatureExtractor` y `Codebook`.
+- `query/ports.py`: `Parser`, `Planner` y `Executor`.
+- `query/plan_types.py`: `QueryPlan` y `ResultSet`.
+
+`tests/mocks.py` trae una versión falsa de cada interface para las pruebas.
 
 ## Entorno
 
