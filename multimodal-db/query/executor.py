@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.metrics import IOStats
 from core.ports.storage import StorageEngine
 
 from query.ports import Executor
@@ -31,6 +32,8 @@ class QueryExecutor(Executor):
             return self._insert(plan)
         if plan.op is PlanOp.DELETE:
             return self._delete(plan)
+        if plan.op is PlanOp.SELECT:
+            return self._select(plan)
         raise ValueError(f"operación no soportada: {plan.op.name}")
 
     def _create_table(self, plan: QueryPlan) -> ResultSet:
@@ -73,3 +76,37 @@ class QueryExecutor(Executor):
     # Arma un resultado que solo informa cuántas filas cambiaron
     def _count_result(self, affected: int) -> ResultSet:
         return ResultSet(columns=["affected"], rows=[(affected,)])
+
+    def _select(self, plan: QueryPlan) -> ResultSet:
+        io = IOStats()
+        pred = plan.predicate
+        if pred is not None:
+            index = self._indexes.get((plan.table, pred.column))
+        else:
+            index = self._any_index(plan.table)
+        records: list[Any] = []
+        if index is not None:
+            result = index.search(pred, plan.k)
+            records = result.records
+            io.merge(result.io)
+        columns, rows = self._project(plan, records)
+        return ResultSet(columns=columns, rows=rows, io=io)
+
+    # Busca cualquier índice de la tabla para un escaneo sin filtro
+    def _any_index(self, table: str) -> Any:
+        for (name, _column), index in self._indexes.items():
+            if name == table:
+                return index
+        return None
+
+    # Deja solo las columnas pedidas en cada fila
+    def _project(self, plan: QueryPlan, records: list[Any]):
+        table_cols = self._tables.get(plan.table, [])
+        wanted = table_cols if plan.columns == ["*"] else plan.columns
+        rows = []
+        for record in records:
+            if isinstance(record, dict):
+                rows.append(tuple(record.get(col) for col in wanted))
+            else:
+                rows.append((record,))
+        return wanted, rows
