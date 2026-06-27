@@ -29,8 +29,20 @@ columns: "*"            -> all_columns
 where_clause: "WHERE"i condition
 ?condition: comparison
           | between
+          | knn_predicate
+          | spatial_predicate
 comparison: NAME COMP_OP value
 between: NAME "BETWEEN"i value "AND"i value
+
+// Busca los k más parecidos a un vector o a un archivo
+knn_predicate: "KNN"i "(" NAME "," knn_query "," INT ")"
+?knn_query: vector
+          | ESCAPED_STRING -> knn_file
+
+// Busca dentro de una caja entre dos esquinas
+spatial_predicate: "WITHIN"i "(" NAME "," vector "," vector ")"
+
+vector: "[" value ("," value)* "]"
 
 limit_clause: "LIMIT"i INT
 
