@@ -64,6 +64,22 @@ class _AstBuilder(Transformer):
     def between(self, items):
         return A.Between(column=str(items[0]), low=items[1], high=items[2])
 
+    def vector(self, items):
+        return list(items)
+
+    def knn_file(self, items):
+        return str(items[0])[1:-1]
+
+    def knn_predicate(self, items):
+        return A.KnnCondition(column=str(items[0]), query=items[1], k=int(items[2]))
+
+    def spatial_predicate(self, items):
+        return A.SpatialCondition(
+            column=str(items[0]),
+            min_corner=items[1],
+            max_corner=items[2],
+        )
+
     def limit_clause(self, items):
         return int(items[0])
 

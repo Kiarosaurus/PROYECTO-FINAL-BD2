@@ -31,6 +31,20 @@ class Between(Condition):
     high: Any
 
 
+# Busca los más parecidos a un vector o a un archivo
+@dataclass
+class KnnCondition(Condition):
+    query: Any
+    k: int
+
+
+# Busca dentro de una caja entre dos esquinas
+@dataclass
+class SpatialCondition(Condition):
+    min_corner: list
+    max_corner: list
+
+
 # Base de todas las sentencias
 @dataclass
 class Statement:
