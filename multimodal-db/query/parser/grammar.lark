@@ -9,8 +9,8 @@ start: statement ";"?
           | select
 
 create_table: "CREATE"i "TABLE"i NAME "(" column_def ("," column_def)* ")"
-column_def: NAME type_name
-type_name: "INT"i | "FLOAT"i | "TEXT"i | "VARCHAR"i | "VECTOR"i | "BOOL"i
+column_def: NAME TYPE
+TYPE: "INT"i | "FLOAT"i | "TEXT"i | "VARCHAR"i | "VECTOR"i | "BOOL"i
 
 drop_table: "DROP"i "TABLE"i NAME
 
