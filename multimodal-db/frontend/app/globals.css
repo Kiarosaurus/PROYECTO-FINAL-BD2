@@ -116,3 +116,27 @@ body {
   color: #9aa4b2;
   word-break: break-all;
 }
+
+.audio-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.audio-item {
+  background: #161a22;
+  border: 1px solid #262c38;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.audio-item figcaption {
+  font-size: 13px;
+  color: #9aa4b2;
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+
+.audio-item audio {
+  width: 100%;
+}

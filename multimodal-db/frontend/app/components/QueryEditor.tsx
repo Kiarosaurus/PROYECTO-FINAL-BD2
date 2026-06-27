@@ -4,6 +4,7 @@ import { useState } from "react";
 import { runQuery, type QueryResult } from "../lib/api";
 import ResultsTable from "./ResultsTable";
 import MediaGallery from "./MediaGallery";
+import AudioPlayer from "./AudioPlayer";
 
 export default function QueryEditor() {
   const [sql, setSql] = useState("SELECT * FROM img");
@@ -43,6 +44,7 @@ export default function QueryEditor() {
           <p className="editor-info">{result.rows.length} filas</p>
           <ResultsTable result={result} />
           <MediaGallery result={result} />
+          <AudioPlayer result={result} />
         </>
       )}
     </section>
