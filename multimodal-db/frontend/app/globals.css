@@ -46,6 +46,27 @@ body {
   resize: vertical;
 }
 
+.snippets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.snippet {
+  padding: 5px 10px;
+  font-size: 12px;
+  color: #c7d0dd;
+  background: #161a22;
+  border: 1px solid #262c38;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.snippet:hover {
+  background: #1b2230;
+  border-color: #34405a;
+}
+
 .editor-actions {
   display: flex;
   align-items: center;

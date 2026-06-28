@@ -6,6 +6,7 @@ import ResultsTable from "./ResultsTable";
 import MediaGallery from "./MediaGallery";
 import AudioPlayer from "./AudioPlayer";
 import MetricsPanel from "./MetricsPanel";
+import SqlSnippets from "./SqlSnippets";
 
 export default function QueryEditor() {
   const [sql, setSql] = useState("SELECT * FROM img");
@@ -36,6 +37,7 @@ export default function QueryEditor() {
 
   return (
     <section className="editor">
+      <SqlSnippets onPick={setSql} />
       <textarea
         className="editor-input"
         value={sql}
