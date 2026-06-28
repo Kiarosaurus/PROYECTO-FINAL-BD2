@@ -131,3 +131,23 @@ def test_inverted_index_restores_snapshot_from_mock_storage() -> None:
     assert storage.stats().disk_writes > 0
     assert [record["id"] for record in result.records] == [1, 2]
     assert restored.document_norm(1) > 0.0
+
+
+def test_inverted_index_streams_postings_across_storage_pages() -> None:
+    storage = MockStorageEngine()
+    index = InvertedIndex(column="body", block_document_limit=10, storage=storage)
+    records = [
+        {
+            "id": doc_id,
+            "body": " ".join(f"term{doc_id}_{term_id}" for term_id in range(40)),
+        }
+        for doc_id in range(1, 30)
+    ]
+
+    index.build(records)
+    restored = InvertedIndex(column="body", block_document_limit=10, storage=storage)
+    result = restored.search(TextMatchPredicate(column="body", terms="term10_7"))
+
+    assert index.posting_page_count() > 1
+    assert restored.posting_page_count() == index.posting_page_count()
+    assert result.records == [records[9]]

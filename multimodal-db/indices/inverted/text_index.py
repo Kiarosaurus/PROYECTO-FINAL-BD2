@@ -11,6 +11,8 @@ from indices.inverted.spimi_builder import SPIMIBlockBuilder, tokenize
 from indices.inverted.text_preprocessor import DEFAULT_PREPROCESSOR, TextPreprocessor
 from indices.ports import TextMatchPredicate
 
+POSTING_PAGE_SIZE = 4096
+
 
 class InvertedIndex(Index):
 
@@ -33,6 +35,7 @@ class InvertedIndex(Index):
         self._postings: dict[str, dict[str, int]] = {}
         self._doc_norms: dict[str, float] = {}
         self._last_block_count = 0
+        self._posting_page_count = 0
         self._load_snapshot()
 
     def build(self, records: Iterable[Any]) -> OperationResult:
@@ -132,6 +135,9 @@ class InvertedIndex(Index):
     def block_count(self) -> int:
         return self._last_block_count
 
+    def posting_page_count(self) -> int:
+        return self._posting_page_count
+
     def document_norm(self, doc_id: Any) -> float:
         return self._doc_norms.get(str(doc_id), 0.0)
 
@@ -167,18 +173,51 @@ class InvertedIndex(Index):
     def _persist_snapshot(self) -> None:
         if self.storage is None:
             return
-        payload = {
+        posting_pages = self._encode_posting_pages()
+        metadata = {
+            "version": 2,
             "column": self.column,
             "documents": self._documents,
-            "postings": self._postings,
             "doc_norms": self._doc_norms,
             "last_block_count": self._last_block_count,
+            "posting_page_count": len(posting_pages),
         }
         try:
-            encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            encoded = json.dumps(metadata, separators=(",", ":")).encode("utf-8")
         except (TypeError, ValueError):
             return
         self.storage.write_page(self.file_id, 0, encoded)
+        for page_no, page in enumerate(posting_pages, start=1):
+            self.storage.write_page(self.file_id, page_no, page)
+        self._posting_page_count = len(posting_pages)
+
+    def _encode_posting_pages(self) -> list[bytes]:
+        rows = [
+            json.dumps(
+                {"term": term, "postings": postings},
+                separators=(",", ":"),
+            ).encode("utf-8") + b"\n"
+            for term, postings in sorted(self._postings.items())
+        ]
+        pages: list[bytes] = []
+        current = bytearray()
+        for row in rows:
+            if current and len(current) + len(row) > POSTING_PAGE_SIZE:
+                pages.append(bytes(current))
+                current = bytearray()
+            if len(row) > POSTING_PAGE_SIZE:
+                pages.extend(self._split_large_row(row))
+                continue
+            current.extend(row)
+        if current:
+            pages.append(bytes(current))
+        return pages
+
+    def _split_large_row(self, row: bytes) -> list[bytes]:
+        return [
+            row[start:start + POSTING_PAGE_SIZE]
+            for start in range(0, len(row), POSTING_PAGE_SIZE)
+        ]
 
     def _load_snapshot(self) -> None:
         if self.storage is None:
@@ -193,11 +232,27 @@ class InvertedIndex(Index):
         if payload.get("column") != self.column:
             return
         self._documents = payload.get("documents", {})
-        self._postings = payload.get("postings", {})
         self._doc_norms = payload.get("doc_norms", {})
         self._last_block_count = payload.get("last_block_count", 0)
+        self._posting_page_count = payload.get("posting_page_count", 0)
+        if "postings" in payload:
+            self._postings = payload.get("postings", {})
+        else:
+            self._postings = self._read_posting_pages(self._posting_page_count)
         if not self._doc_norms:
             self._compute_document_norms()
+
+    def _read_posting_pages(self, page_count: int) -> dict[str, dict[str, int]]:
+        raw = bytearray()
+        for page_no in range(1, page_count + 1):
+            raw.extend(self.storage.read_page(self.file_id, page_no))
+        postings: dict[str, dict[str, int]] = {}
+        for line in raw.splitlines():
+            if not line:
+                continue
+            item = json.loads(line.decode("utf-8"))
+            postings[item["term"]] = item["postings"]
+        return postings
 
     def _stats(self) -> IOStats:
         if self.storage is None:
