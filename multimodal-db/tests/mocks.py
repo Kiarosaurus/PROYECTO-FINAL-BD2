@@ -12,6 +12,7 @@ from multimedia.ports.extractor import FeatureExtractor
 from multimedia.ports.codebook import Codebook
 from query.ports import Parser, Planner, Executor
 from query.plan_types import PlanOp, QueryPlan, ResultSet
+from query.index_factory import IndexFactory, IndexType
 
 
 # Guarda las páginas en memoria
@@ -137,3 +138,14 @@ class MockExecutor(Executor):
 
     def execute(self, plan: QueryPlan) -> ResultSet:
         return ResultSet()
+
+
+# Entrega un MockIndex sin importar el tipo
+class MockIndexFactory(IndexFactory):
+
+    def __init__(self) -> None:
+        self.created: list[IndexType] = []
+
+    def create(self, index_type: IndexType, schema: Any, storage: Any) -> MockIndex:
+        self.created.append(index_type)
+        return MockIndex()

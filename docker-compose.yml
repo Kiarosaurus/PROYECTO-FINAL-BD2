@@ -1,5 +1,5 @@
 services:
-  # Driven adapter de persistencia y comparación de índices nativos
+  # Base de datos donde se guardan las cosas
   postgres:
     image: pgvector/pgvector:pg16
     container_name: multimodal-db-postgres
@@ -11,7 +11,7 @@ services:
       - "5432:5432"
     volumes:
       - pg-data:/var/lib/postgresql/data
-      # Los init scripts corren solo en el primer arranque con data dir vacío
+      # Estos scripts solo corren la primera vez que arranca vacío
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mmdb} -d ${POSTGRES_DB:-multimodal}"]
@@ -23,7 +23,7 @@ services:
       - mmdb-net
     restart: unless-stopped
 
-  # Driving adapter FastAPI con el query processor y los multimedia endpoints
+  # Servidor que recibe las consultas y atiende los archivos
   backend:
     build:
       context: .
@@ -32,20 +32,14 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app
-      # Selector de StorageEngine con valor file o postgres
+      # Elige dónde se guardan los datos, en archivos o en postgres
       STORAGE_BACKEND: ${STORAGE_BACKEND:-file}
       POSTGRES_DSN: postgresql://${POSTGRES_USER:-mmdb}:${POSTGRES_PASSWORD:-mmdb}@postgres:5432/${POSTGRES_DB:-multimodal}
     ports:
       - "8000:8000"
     volumes:
-      - ./core:/app/core
-      - ./indices:/app/indices
-      - ./multimedia:/app/multimedia
-      - ./query:/app/query
-      - ./comparison:/app/comparison
-      - ./service:/app/service
-      - ./api:/app/api
-      - ./data:/app/data
+      # Comparte el código para no reconstruir en cada cambio
+      - ./multimodal-db:/app
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,11 +53,13 @@ services:
       - mmdb-net
     restart: unless-stopped
 
-  # Presentation layer Next.js donde vive el patrón MVC
+  # La página web que ve el usuario
   frontend:
     build:
-      context: ./frontend
-      dockerfile: ../docker/frontend.Dockerfile
+      context: ./multimodal-db/frontend
+      dockerfile: ../../docker/frontend.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
     container_name: multimodal-db-frontend
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000

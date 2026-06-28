@@ -24,6 +24,8 @@ class QueryPlan:
     op: PlanOp
     table: str
     columns: list[str] = field(default_factory=list)
+    # Tipo de cada columna al crear una tabla
+    column_types: list[str] = field(default_factory=list)
     # Condición para filtrar filas
     predicate: Predicate | None = None
     # Filas a insertar
@@ -40,3 +42,11 @@ class ResultSet:
     columns: list[str] = field(default_factory=list)
     rows: list[tuple] = field(default_factory=list)
     io: IOStats = field(default_factory=IOStats)
+    # Índice que se usó para resolver la consulta
+    index_type: str | None = None
+    # Familia de búsqueda del predicado
+    predicate_kind: str | None = None
+    # Tiempo de ejecución en milisegundos
+    elapsed_ms: float = 0.0
+    # Plan paso a paso como pares de sangría y texto
+    explain: list[tuple[int, str]] = field(default_factory=list)

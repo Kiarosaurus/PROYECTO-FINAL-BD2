@@ -5,8 +5,9 @@ __pycache__/
 .venv/
 venv/
 .env
+uploads/
 
-# dataset local — no commitear
+# dataset local
 data/raw/*.csv
 data/raw/covers/
 data/manifest.json

@@ -1,0 +1,10 @@
+.git
+.venv
+scripts
+**/__pycache__
+**/*.pyc
+.pytest_cache
+**/.pytest_cache
+multimodal-db/frontend/node_modules
+multimodal-db/frontend/.next
+multimodal-db/uploads
