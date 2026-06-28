@@ -13,7 +13,7 @@ function formatCell(value: unknown): string {
 
 export default function ResultsTable({ result }: { result: QueryResult }) {
   if (result.columns.length === 0) {
-    return <p className="editor-info">Sin columnas.</p>;
+    return <p className="editor-info">La consulta no devolvió filas.</p>;
   }
   return (
     <table className="results">

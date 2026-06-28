@@ -23,6 +23,8 @@ body {
 
 .content {
   padding: 24px;
+  max-width: 960px;
+  margin: 0 auto;
 }
 
 .editor {
@@ -61,7 +63,11 @@ body {
 }
 
 .editor-error {
-  color: #ff6b6b;
+  color: #ff8a8a;
+  background: #2a1416;
+  border: 1px solid #5a2327;
+  border-radius: 6px;
+  padding: 10px 12px;
 }
 
 .editor-info {
@@ -118,6 +124,14 @@ body {
 
 .results td {
   font-family: ui-monospace, monospace;
+}
+
+.results tbody tr:nth-child(even) {
+  background: #12161e;
+}
+
+.results tbody tr:hover {
+  background: #1b2230;
 }
 
 .gallery {
