@@ -9,8 +9,8 @@ export default function QueryHistory({
     return null;
   }
   return (
-    <div className="history">
-      <span className="history-title">Historial</span>
+    <details className="history">
+      <summary className="history-title">Historial</summary>
       <ul className="history-list">
         {items.map((sql, i) => (
           <li key={i}>
@@ -24,6 +24,6 @@ export default function QueryHistory({
           </li>
         ))}
       </ul>
-    </div>
+    </details>
   );
 }

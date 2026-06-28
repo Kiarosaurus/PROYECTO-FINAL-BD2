@@ -60,6 +60,7 @@ export default function QueryEditor() {
         <span className="editor-hint">Ctrl+Enter para ejecutar</span>
       </div>
       <QueryHistory items={history} onPick={setSql} />
+      {result && <PlanInspector sql={ranSql} result={result} />}
       {error && <p className="editor-error">{error}</p>}
       {result && (
         <>
@@ -68,7 +69,6 @@ export default function QueryEditor() {
           <ResultsTable result={result} />
           <MediaGallery result={result} />
           <AudioPlayer result={result} />
-          <PlanInspector sql={ranSql} result={result} />
         </>
       )}
     </section>

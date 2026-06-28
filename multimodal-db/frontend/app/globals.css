@@ -106,6 +106,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #6b7280;
+  cursor: pointer;
 }
 
 .history-list {
@@ -113,6 +114,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  margin-top: 6px;
 }
 
 .history-item {
