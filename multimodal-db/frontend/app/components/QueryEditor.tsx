@@ -8,6 +8,7 @@ import AudioPlayer from "./AudioPlayer";
 import MetricsPanel from "./MetricsPanel";
 import SqlSnippets from "./SqlSnippets";
 import QueryHistory from "./QueryHistory";
+import PlanInspector from "./PlanInspector";
 
 export default function QueryEditor() {
   const [sql, setSql] = useState("SELECT * FROM img");
@@ -15,10 +16,12 @@ export default function QueryEditor() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
+  const [ranSql, setRanSql] = useState("");
 
   async function onRun() {
     setLoading(true);
     setError(null);
+    setRanSql(sql);
     try {
       const data = await runQuery(sql);
       setResult(data);
@@ -65,6 +68,7 @@ export default function QueryEditor() {
           <ResultsTable result={result} />
           <MediaGallery result={result} />
           <AudioPlayer result={result} />
+          <PlanInspector sql={ranSql} result={result} />
         </>
       )}
     </section>
