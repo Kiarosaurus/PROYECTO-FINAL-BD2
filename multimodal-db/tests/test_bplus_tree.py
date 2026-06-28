@@ -56,6 +56,45 @@ def test_bplus_tree_keeps_duplicate_keys_clustered() -> None:
     ]
 
 
+def test_bplus_tree_keeps_duplicates_after_leaf_splits() -> None:
+    index = BPlusTreeIndex(column="id", order=3)
+    records = [
+        {"id": 1, "name": "row-1"},
+        {"id": 2, "name": "row-2a"},
+        {"id": 3, "name": "row-3"},
+        {"id": 4, "name": "row-4"},
+        {"id": 5, "name": "row-5"},
+        {"id": 2, "name": "row-2b"},
+        {"id": 2, "name": "row-2c"},
+    ]
+
+    index.build(records)
+    index.insert(2, {"id": 2, "name": "row-2d"})
+    result = index.search(EqualityPredicate(column="id", value=2))
+    range_result = index.search(RangePredicate(column="id", low=2, high=2))
+
+    assert [record["name"] for record in result.records] == [
+        "row-2a",
+        "row-2b",
+        "row-2c",
+        "row-2d",
+    ]
+    assert [record["name"] for record in range_result.records] == [
+        "row-2a",
+        "row-2b",
+        "row-2c",
+        "row-2d",
+    ]
+
+
+def test_bplus_tree_leaf_split_position_avoids_duplicate_boundary() -> None:
+    index = BPlusTreeIndex(column="id", order=3)
+
+    split = index._leaf_split_position([1, 2, 2, 2, 3])
+
+    assert split == 4
+
+
 def test_bplus_tree_delete_removes_clustered_key_group() -> None:
     index = BPlusTreeIndex(column="id", order=4)
     index.build({"id": value, "name": f"row-{value}"} for value in range(1, 8))

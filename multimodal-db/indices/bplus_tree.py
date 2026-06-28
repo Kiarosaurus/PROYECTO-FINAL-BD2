@@ -109,7 +109,7 @@ class BPlusTreeIndex(Index):
         return node
 
     def _split_leaf(self, leaf: _LeafNode) -> tuple[Any, _LeafNode]:
-        mid = len(leaf.keys) // 2
+        mid = self._leaf_split_position(leaf.keys)
         right = _LeafNode(
             keys=leaf.keys[mid:],
             values=leaf.values[mid:],
@@ -119,6 +119,17 @@ class BPlusTreeIndex(Index):
         leaf.values = leaf.values[:mid]
         leaf.next = right
         return right.keys[0], right
+
+    def _leaf_split_position(self, keys: list[Any]) -> int:
+        mid = len(keys) // 2
+        while mid < len(keys) and keys[mid - 1] == keys[mid]:
+            mid += 1
+        if mid < len(keys):
+            return mid
+        mid = len(keys) // 2
+        while mid > 1 and keys[mid - 1] == keys[mid]:
+            mid -= 1
+        return mid
 
     def _insert_in_parent(
         self,
