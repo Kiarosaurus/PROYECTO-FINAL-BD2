@@ -24,4 +24,7 @@ def run_query(req: QueryRequest, session: Session = Depends(get_session)) -> Que
             disk_writes=result.io.disk_writes,
             pages_allocated=result.io.pages_allocated,
         ),
+        index_type=result.index_type,
+        predicate_kind=result.predicate_kind,
+        elapsed_ms=result.elapsed_ms,
     )

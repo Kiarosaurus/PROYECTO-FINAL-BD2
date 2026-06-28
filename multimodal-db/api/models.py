@@ -22,6 +22,9 @@ class QueryResponse(BaseModel):
     columns: list[str] = Field(default_factory=list)
     rows: list[list[Any]] = Field(default_factory=list)
     io: IOStatsModel = Field(default_factory=IOStatsModel)
+    index_type: str | None = None
+    predicate_kind: str | None = None
+    elapsed_ms: float = 0.0
 
 
 # Lo que el servidor responde cuando algo falla

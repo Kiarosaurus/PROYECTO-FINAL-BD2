@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from core.metrics import IOStats
@@ -22,6 +23,15 @@ class QueryExecutor(Executor):
         self._indexes: dict[tuple[str, str], Any] = {}
 
     def execute(self, plan: QueryPlan) -> ResultSet:
+        start = time.perf_counter()
+        result = self._dispatch(plan)
+        result.elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
+        result.index_type = plan.index_type
+        if plan.predicate is not None:
+            result.predicate_kind = plan.predicate.kind.name.lower()
+        return result
+
+    def _dispatch(self, plan: QueryPlan) -> ResultSet:
         if plan.op is PlanOp.CREATE_TABLE:
             return self._create_table(plan)
         if plan.op is PlanOp.DROP_TABLE:
