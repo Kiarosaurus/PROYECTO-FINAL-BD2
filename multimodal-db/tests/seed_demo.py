@@ -3,6 +3,7 @@ import base64
 import io
 import mimetypes
 import os
+import tempfile
 import wave
 
 import httpx
@@ -11,6 +12,19 @@ API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
 # Carpeta local con imágenes reales para el seed
 IMAGES_DIR = os.environ.get("SEED_IMAGES_DIR", "")
+
+# Carpeta pública de Drive con las imágenes del proyecto
+DRIVE_FOLDER_ID = os.environ.get(
+    "DRIVE_FOLDER_ID", "1wMM1RE6PQpR1ietWuycNmI4Dj7WHBD0w"
+)
+
+# Bajar de Drive solo cuando se pide de forma explícita
+USE_DRIVE = os.environ.get("USE_DRIVE", "") not in ("", "0", "false", "False")
+
+# Donde quedan las imágenes bajadas de Drive
+DRIVE_CACHE = os.environ.get(
+    "DRIVE_CACHE_DIR", os.path.join(tempfile.gettempdir(), "mmdb_drive")
+)
 
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 
@@ -32,15 +46,42 @@ def _tiny_wav() -> bytes:
     return buffer.getvalue()
 
 
-# Lista las imágenes de la carpeta local si existe
-def _local_images() -> list[str]:
-    if not IMAGES_DIR or not os.path.isdir(IMAGES_DIR):
+# Lista las imágenes de una carpeta que existe
+def _images_in(folder: str) -> list[str]:
+    if not folder or not os.path.isdir(folder):
         return []
     paths = []
-    for name in sorted(os.listdir(IMAGES_DIR)):
+    for name in sorted(os.listdir(folder)):
         if name.lower().endswith(IMAGE_EXT):
-            paths.append(os.path.join(IMAGES_DIR, name))
+            paths.append(os.path.join(folder, name))
     return paths
+
+
+# Baja la carpeta pública de Drive y lista sus imágenes
+def _drive_images() -> list[str]:
+    if not USE_DRIVE:
+        return []
+    import gdown
+
+    os.makedirs(DRIVE_CACHE, exist_ok=True)
+    gdown.download_folder(
+        id=DRIVE_FOLDER_ID,
+        output=DRIVE_CACHE,
+        quiet=True,
+        use_cookies=False,
+    )
+    return _images_in(DRIVE_CACHE)
+
+
+# Decide de dónde salen las imágenes del seed
+def _image_source() -> tuple[list[str], str]:
+    local = _images_in(IMAGES_DIR)
+    if local:
+        return local, IMAGES_DIR
+    drive = _drive_images()
+    if drive:
+        return drive, f"drive:{DRIVE_FOLDER_ID}"
+    return [], "synthetic"
 
 
 def run_query(client: httpx.Client, sql: str) -> dict:
@@ -82,14 +123,14 @@ def main() -> None:
         run_query(client, "CREATE TABLE media (id INT, path TEXT)")
         run_query(client, "CREATE INDEX ON media (id) USING hash")
 
-        images = _local_images()
+        images, source = _image_source()
         rows = _seed_from_folder(client, images) if images else _seed_synthetic(client)
 
         values = ", ".join(f'({i}, "{name}")' for i, name in rows)
         run_query(client, f"INSERT INTO media (id, path) VALUES {values}")
         result = run_query(client, "SELECT * FROM media")
 
-        print("source:", IMAGES_DIR if images else "synthetic")
+        print("source:", source)
         print("columns:", result["columns"])
         for row in result["rows"]:
             print("row:", row)
