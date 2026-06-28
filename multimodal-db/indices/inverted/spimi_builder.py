@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import heapq
-import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable
+
+from indices.inverted.text_preprocessor import DEFAULT_PREPROCESSOR, TextPreprocessor
 
 
 Postings = dict[str, int]
@@ -11,18 +12,19 @@ Block = list[tuple[str, Postings]]
 
 
 def tokenize(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+", text.lower())
+    return DEFAULT_PREPROCESSOR.tokenize(text)
 
 
 @dataclass
 class SPIMIBlockBuilder:
     block_document_limit: int = 128
+    preprocessor: TextPreprocessor = DEFAULT_PREPROCESSOR
     _current: dict[str, Postings] = field(default_factory=dict)
     _blocks: list[Block] = field(default_factory=list)
     _documents_in_block: int = 0
 
     def add_document(self, doc_id: str, text: str) -> None:
-        for term in tokenize(text):
+        for term in self.preprocessor.tokenize(text):
             postings = self._current.setdefault(term, {})
             postings[doc_id] = postings.get(doc_id, 0) + 1
         self._documents_in_block += 1

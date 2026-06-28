@@ -8,6 +8,7 @@ from core.metrics import IOStats, OperationResult
 from core.ports.index import Index
 from core.ports.storage import StorageEngine
 from indices.inverted.spimi_builder import SPIMIBlockBuilder, tokenize
+from indices.inverted.text_preprocessor import DEFAULT_PREPROCESSOR, TextPreprocessor
 from indices.ports import TextMatchPredicate
 
 
@@ -19,6 +20,7 @@ class InvertedIndex(Index):
         block_document_limit: int = 128,
         storage: StorageEngine | None = None,
         file_id: str | None = None,
+        preprocessor: TextPreprocessor = DEFAULT_PREPROCESSOR,
     ) -> None:
         if block_document_limit < 1:
             raise ValueError("SPIMI block document limit must be positive")
@@ -26,6 +28,7 @@ class InvertedIndex(Index):
         self.block_document_limit = block_document_limit
         self.storage = storage
         self.file_id = file_id or f"inverted_{column}"
+        self.preprocessor = preprocessor
         self._documents: dict[str, Any] = {}
         self._postings: dict[str, dict[str, int]] = {}
         self._doc_norms: dict[str, float] = {}
@@ -39,7 +42,10 @@ class InvertedIndex(Index):
             doc_id = self._document_id(record, position)
             self._documents[doc_id] = record
             documents.append((doc_id, self._record_text(record)))
-        builder = SPIMIBlockBuilder(block_document_limit=self.block_document_limit)
+        builder = SPIMIBlockBuilder(
+            block_document_limit=self.block_document_limit,
+            preprocessor=self.preprocessor,
+        )
         self._postings = builder.build(documents)
         self._last_block_count = builder.block_count()
         self._compute_document_norms()
@@ -50,7 +56,7 @@ class InvertedIndex(Index):
         doc_id = str(key)
         self._documents[doc_id] = record
         term_counts: dict[str, int] = {}
-        for term in tokenize(self._record_text(record)):
+        for term in self.preprocessor.tokenize(self._record_text(record)):
             term_counts[term] = term_counts.get(term, 0) + 1
         for term, frequency in term_counts.items():
             postings = self._postings.setdefault(term, {})
@@ -60,7 +66,9 @@ class InvertedIndex(Index):
         return OperationResult(affected=1, io=self._stats())
 
     def search(self, predicate: TextMatchPredicate | Any, k: int | None = None) -> OperationResult:
-        terms = tokenize(predicate.terms if isinstance(predicate, TextMatchPredicate) else str(predicate))
+        terms = self.preprocessor.tokenize(
+            predicate.terms if isinstance(predicate, TextMatchPredicate) else str(predicate)
+        )
         if not terms:
             return OperationResult(records=[], io=self._stats())
         limit = k if k is not None else getattr(predicate, "k", None)
@@ -70,7 +78,7 @@ class InvertedIndex(Index):
 
     def rank(self, query: str, k: int | None = None) -> list[tuple[str, float]]:
         query_tf: dict[str, int] = {}
-        for term in tokenize(query):
+        for term in self.preprocessor.tokenize(query):
             query_tf[term] = query_tf.get(term, 0) + 1
         if not query_tf:
             return []
@@ -116,7 +124,7 @@ class InvertedIndex(Index):
         return OperationResult(affected=1, io=self._stats())
 
     def postings_for(self, term: str) -> dict[str, int]:
-        tokens = tokenize(term)
+        tokens = self.preprocessor.tokenize(term)
         if not tokens:
             return {}
         return dict(self._postings.get(tokens[0], {}))

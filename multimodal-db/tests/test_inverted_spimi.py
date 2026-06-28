@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from indices.inverted.spimi_builder import SPIMIBlockBuilder
 from indices.inverted.text_index import InvertedIndex
+from indices.inverted.text_preprocessor import TextPreprocessor
 from indices.ports import TextMatchPredicate
 from tests.mocks import MockStorageEngine
 
@@ -24,6 +25,18 @@ def test_spimi_builder_flushes_blocks_and_merges_terms_with_heap() -> None:
     assert postings["gamma"] == {"2": 1, "3": 1, "4": 2}
 
 
+def test_text_preprocessor_removes_stopwords_and_stems_terms() -> None:
+    preprocessor = TextPreprocessor()
+
+    terms = preprocessor.tokenize("The databases are running and retrieved results")
+
+    assert "the" not in terms
+    assert "are" not in terms
+    assert "databas" in terms
+    assert "run" in terms
+    assert "retriev" in terms
+
+
 def test_inverted_index_builds_spimi_postings_for_text_records() -> None:
     index = InvertedIndex(column="body", block_document_limit=2)
     records = [
@@ -38,6 +51,21 @@ def test_inverted_index_builds_spimi_postings_for_text_records() -> None:
     assert result.affected == len(records)
     assert index.block_count() == 2
     assert index.postings_for("database") == {"10": 2, "30": 1}
+    assert index.postings_for("systems") == {"10": 1, "20": 1}
+
+
+def test_inverted_index_uses_preprocessor_for_search_terms() -> None:
+    index = InvertedIndex(column="body", block_document_limit=2)
+    index.build(
+        [
+            {"id": 1, "body": "the running database"},
+            {"id": 2, "body": "database reports"},
+        ]
+    )
+
+    result = index.search(TextMatchPredicate(column="body", terms="runs"))
+
+    assert result.records == [{"id": 1, "body": "the running database"}]
 
 
 def test_inverted_index_text_match_ranks_by_tfidf_cosine() -> None:
