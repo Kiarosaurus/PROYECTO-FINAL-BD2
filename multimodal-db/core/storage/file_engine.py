@@ -32,7 +32,7 @@ class FileStorageEngine(StorageEngine):
     def stats(self) -> IOStats:
         return self._stats
 
-    # Una pagina fisica por file_id, se crea la primera vez que se pide
+    # Un heap file por file_id, se crea la primera vez que se pide
     def _heap_file(self, file_id: str) -> HeapFile:
         heap_file = self._files.get(file_id)
         if heap_file is None:

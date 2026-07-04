@@ -31,12 +31,12 @@ class HeapFile:
     def write_page(self, page_no: int, data: bytes) -> None:
         self._ensure_slot(page_no)
         offset, capacity, _length = self._read_entry(page_no)
-        # Si el dato entra en el espacio ya reservado, se sobreescribe ahi mismo
+        # Si el dato entra en el espacio ya reservado, se sobreescribe ahí mismo
         if len(data) <= capacity:
             self._write_at(offset, data)
             self._write_entry(page_no, offset, capacity, len(data))
             return
-        # El hueco que deja esta pagina queda libre para una futura reasignacion
+        # El hueco que deja esta página queda libre para una futura reasignación
         if capacity > 0:
             self._free.append((offset, capacity))
         new_offset, new_capacity = self._place(len(data))
@@ -49,13 +49,13 @@ class HeapFile:
         self._ensure_slot(page_no)
         return page_no
 
-    # Crea entradas vacias hasta cubrir page_no, incluso si nunca se pidio allocate_page
+    # Crea entradas vacías hasta cubrir page_no, incluso si nunca se pidió allocate_page
     def _ensure_slot(self, page_no: int) -> None:
         while self.page_count() <= page_no:
             offset = self._data_path.stat().st_size
             self._write_entry(self.page_count(), offset, 0, 0)
 
-    # Busca el hueco libre mas ajustado que alcance, si no hay ninguno agranda el archivo
+    # Busca el hueco libre más ajustado que alcance, si no hay ninguno agranda el archivo
     def _place(self, size: int) -> tuple[int, int]:
         candidates = [i for i, (_offset, capacity) in enumerate(self._free) if capacity >= size]
         if not candidates:
