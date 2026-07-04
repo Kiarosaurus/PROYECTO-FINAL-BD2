@@ -56,6 +56,14 @@ CREATE TABLE IF NOT EXISTS engine.metadata (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Paginas genericas del StorageEngine propio cuando corre sobre Postgres.
+CREATE TABLE IF NOT EXISTS engine.page (
+    file_id       TEXT    NOT NULL,
+    page_no       INTEGER NOT NULL,
+    data          BYTEA   NOT NULL,
+    PRIMARY KEY (file_id, page_no)
+);
+
 -- Schema compare. Baselines nativos.
 CREATE SCHEMA IF NOT EXISTS compare;
 
