@@ -37,28 +37,34 @@ class LRUBufferManager(BufferManager):
             page.pin_count -= 1
 
     def flush(self, file_id: str | None = None) -> None:
-        for page in self._cache.values():
-            if file_id is not None and page.file_id != file_id:
-                continue
-            self._flush_page(page)
+        pages = [page for page in self._cache.values() if file_id is None or page.file_id == file_id]
+        self._write_back(pages)
 
     # Un solo IOStats por StorageEngine, nadie mas lleva su propio contador
     def stats(self) -> IOStats:
         return self._storage.stats()
 
-    # Desaloja las paginas menos usadas hasta volver a estar dentro de la capacidad
+    # Primero se eligen todas las victimas, recien despues se escriben juntas
     def _make_room(self, protect: tuple[str, int] | None = None) -> None:
-        for key, page in list(self._cache.items()):
-            if len(self._cache) <= self._capacity:
-                return
+        overflow = len(self._cache) - self._capacity
+        if overflow <= 0:
+            return
+        victims: list[tuple[tuple[str, int], Page]] = []
+        for key, page in self._cache.items():
+            if len(victims) >= overflow:
+                break
             if key == protect or page.pin_count > 0:
                 continue
-            self._flush_page(page)
-            del self._cache[key]
-        if len(self._cache) > self._capacity:
+            victims.append((key, page))
+        if len(victims) < overflow:
             raise RuntimeError("el buffer esta lleno y todas sus paginas estan fijadas")
+        self._write_back([page for _, page in victims])
+        for key, _ in victims:
+            del self._cache[key]
 
-    def _flush_page(self, page: Page) -> None:
-        if page.dirty:
-            self._storage.write_page(page.file_id, page.page_no, bytes(page.data))
-            page.dirty = False
+    # Escribe las paginas sucias ordenadas por archivo, para no saltar entre archivos
+    def _write_back(self, pages: list[Page]) -> None:
+        for page in sorted(pages, key=lambda p: (p.file_id, p.page_no)):
+            if page.dirty:
+                self._storage.write_page(page.file_id, page.page_no, bytes(page.data))
+                page.dirty = False
