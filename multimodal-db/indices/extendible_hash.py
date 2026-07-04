@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 from core.metrics import IOStats, OperationResult
+from core.ports.buffer import BufferManager
 from core.ports.index import Index
-from core.ports.storage import StorageEngine
 from indices.ports import EqualityPredicate, RangePredicate, SearchPredicate
 
 
@@ -23,14 +23,14 @@ class ExtendibleHashIndex(Index):
         self,
         column: str,
         bucket_capacity: int = 4,
-        storage: StorageEngine | None = None,
+        buffer: BufferManager | None = None,
         file_id: str | None = None,
     ) -> None:
         if bucket_capacity < 1:
             raise ValueError("Hash bucket capacity must be positive")
         self.column = column
         self.bucket_capacity = bucket_capacity
-        self.storage = storage
+        self.buffer = buffer
         self.file_id = file_id or f"hash_{column}"
         self.global_depth = 1
         self._buckets: list[_Bucket] = [_Bucket(local_depth=1), _Bucket(local_depth=1)]
@@ -102,8 +102,8 @@ class ExtendibleHashIndex(Index):
         new_bucket = _Bucket(local_depth=bucket.local_depth)
         new_bucket_index = len(self._buckets)
         self._buckets.append(new_bucket)
-        if self.storage is not None:
-            self.storage.allocate_page(f"{self.file_id}_bucket")
+        if self.buffer is not None:
+            self.buffer.allocate_page(f"{self.file_id}_bucket")
         split_bit = 1 << old_depth
         for pos, current_bucket_index in enumerate(self._directory):
             if current_bucket_index == bucket_index and pos & split_bit:
@@ -159,7 +159,7 @@ class ExtendibleHashIndex(Index):
         return getattr(record, self.column)
 
     def _persist_snapshot(self) -> None:
-        if self.storage is None:
+        if self.buffer is None:
             return
         payload = {
             "column": self.column,
@@ -178,12 +178,13 @@ class ExtendibleHashIndex(Index):
             encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         except (TypeError, ValueError):
             return
-        self.storage.write_page(self.file_id, 0, encoded)
+        self._write_page(0, encoded)
+        self.buffer.flush(self.file_id)
 
     def _load_snapshot(self) -> None:
-        if self.storage is None:
+        if self.buffer is None:
             return
-        raw = self.storage.read_page(self.file_id, 0)
+        raw = self._read_page(0)
         if not raw:
             return
         try:
@@ -206,7 +207,15 @@ class ExtendibleHashIndex(Index):
             self._directory = [0, 1]
             self.global_depth = 1
 
+    def _read_page(self, page_no: int) -> bytes:
+        return bytes(self.buffer.get(self.file_id, page_no).data)
+
+    def _write_page(self, page_no: int, data: bytes) -> None:
+        page = self.buffer.get(self.file_id, page_no)
+        page.data[:] = data
+        page.dirty = True
+
     def _stats(self) -> IOStats:
-        if self.storage is None:
+        if self.buffer is None:
             return IOStats()
-        return self.storage.stats()
+        return self.buffer.stats()

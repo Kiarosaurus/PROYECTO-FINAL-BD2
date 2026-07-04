@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from indices.bplus_tree import BPlusTreeIndex
 from indices.ports import EqualityPredicate, RangePredicate
-from tests.mocks import MockStorageEngine
+from tests.mocks import MockBufferManager, MockStorageEngine
 
 
 def test_bplus_tree_searches_inserted_records_by_key() -> None:
     storage = MockStorageEngine()
-    index = BPlusTreeIndex(column="id", order=4, storage=storage)
+    buffer = MockBufferManager(storage)
+    index = BPlusTreeIndex(column="id", order=4, buffer=buffer)
     records = [{"id": value, "name": f"row-{value}"} for value in [7, 2, 9, 1, 5, 3]]
 
     result = index.build(records)
@@ -111,10 +112,11 @@ def test_bplus_tree_delete_removes_clustered_key_group() -> None:
 
 def test_bplus_tree_restores_records_from_mock_storage_snapshot() -> None:
     storage = MockStorageEngine()
-    index = BPlusTreeIndex(column="id", order=4, storage=storage)
+    buffer = MockBufferManager(storage)
+    index = BPlusTreeIndex(column="id", order=4, buffer=buffer)
     index.build({"id": value, "name": f"row-{value}"} for value in range(1, 8))
 
-    restored = BPlusTreeIndex(column="id", order=4, storage=storage)
+    restored = BPlusTreeIndex(column="id", order=4, buffer=buffer)
     result = restored.search(RangePredicate(column="id", low=2, high=5))
 
     assert storage.stats().disk_writes > 0

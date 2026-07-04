@@ -7,8 +7,8 @@ from typing import Any, Iterable
 from rtree import index as rtree_index
 
 from core.metrics import IOStats, OperationResult
+from core.ports.buffer import BufferManager
 from core.ports.index import Index
-from core.ports.storage import StorageEngine
 from indices.ports import (
     EqualityPredicate,
     KnnPredicate,
@@ -24,7 +24,7 @@ class RTreeIndex(Index):
         column: str,
         dimensions: int = 2,
         max_entries: int = 50,
-        storage: StorageEngine | None = None,
+        buffer: BufferManager | None = None,
         file_id: str | None = None,
     ) -> None:
         if dimensions < 1:
@@ -34,7 +34,7 @@ class RTreeIndex(Index):
         self.column = column
         self.dimensions = dimensions
         self.max_entries = max_entries
-        self.storage = storage
+        self.buffer = buffer
         self.file_id = file_id or f"rtree_{column}"
         self._records: dict[int, Any] = {}
         self._points: dict[int, tuple[float, ...]] = {}
@@ -163,7 +163,7 @@ class RTreeIndex(Index):
         return math.sqrt(sum((a - b) ** 2 for a, b in zip(first, second)))
 
     def _persist_snapshot(self) -> None:
-        if self.storage is None:
+        if self.buffer is None:
             return
         payload = {
             "column": self.column,
@@ -175,12 +175,13 @@ class RTreeIndex(Index):
             encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         except (TypeError, ValueError):
             return
-        self.storage.write_page(self.file_id, 0, encoded)
+        self._write_page(0, encoded)
+        self.buffer.flush(self.file_id)
 
     def _load_snapshot(self) -> None:
-        if self.storage is None:
+        if self.buffer is None:
             return
-        raw = self.storage.read_page(self.file_id, 0)
+        raw = self._read_page(0)
         if not raw:
             return
         try:
@@ -196,7 +197,15 @@ class RTreeIndex(Index):
         for record in payload.get("records", []):
             self._insert_record(record)
 
+    def _read_page(self, page_no: int) -> bytes:
+        return bytes(self.buffer.get(self.file_id, page_no).data)
+
+    def _write_page(self, page_no: int, data: bytes) -> None:
+        page = self.buffer.get(self.file_id, page_no)
+        page.data[:] = data
+        page.dirty = True
+
     def _stats(self) -> IOStats:
-        if self.storage is None:
+        if self.buffer is None:
             return IOStats()
-        return self.storage.stats()
+        return self.buffer.stats()

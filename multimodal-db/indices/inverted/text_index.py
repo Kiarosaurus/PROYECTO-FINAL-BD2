@@ -5,8 +5,8 @@ import math
 from typing import Any, Iterable
 
 from core.metrics import IOStats, OperationResult
+from core.ports.buffer import BufferManager
 from core.ports.index import Index
-from core.ports.storage import StorageEngine
 from indices.inverted.spimi_builder import SPIMIBlockBuilder, tokenize
 from indices.inverted.text_preprocessor import DEFAULT_PREPROCESSOR, TextPreprocessor
 from indices.ports import TextMatchPredicate
@@ -20,7 +20,7 @@ class InvertedIndex(Index):
         self,
         column: str,
         block_document_limit: int = 128,
-        storage: StorageEngine | None = None,
+        buffer: BufferManager | None = None,
         file_id: str | None = None,
         preprocessor: TextPreprocessor = DEFAULT_PREPROCESSOR,
     ) -> None:
@@ -28,7 +28,7 @@ class InvertedIndex(Index):
             raise ValueError("SPIMI block document limit must be positive")
         self.column = column
         self.block_document_limit = block_document_limit
-        self.storage = storage
+        self.buffer = buffer
         self.file_id = file_id or f"inverted_{column}"
         self.preprocessor = preprocessor
         self._documents: dict[str, Any] = {}
@@ -171,7 +171,7 @@ class InvertedIndex(Index):
         return str(getattr(record, self.column))
 
     def _persist_snapshot(self) -> None:
-        if self.storage is None:
+        if self.buffer is None:
             return
         posting_pages = self._encode_posting_pages()
         metadata = {
@@ -186,9 +186,10 @@ class InvertedIndex(Index):
             encoded = json.dumps(metadata, separators=(",", ":")).encode("utf-8")
         except (TypeError, ValueError):
             return
-        self.storage.write_page(self.file_id, 0, encoded)
+        self._write_page(0, encoded)
         for page_no, page in enumerate(posting_pages, start=1):
-            self.storage.write_page(self.file_id, page_no, page)
+            self._write_page(page_no, page)
+        self.buffer.flush(self.file_id)
         self._posting_page_count = len(posting_pages)
 
     def _encode_posting_pages(self) -> list[bytes]:
@@ -220,9 +221,9 @@ class InvertedIndex(Index):
         ]
 
     def _load_snapshot(self) -> None:
-        if self.storage is None:
+        if self.buffer is None:
             return
-        raw = self.storage.read_page(self.file_id, 0)
+        raw = self._read_page(0)
         if not raw:
             return
         try:
@@ -245,7 +246,7 @@ class InvertedIndex(Index):
     def _read_posting_pages(self, page_count: int) -> dict[str, dict[str, int]]:
         raw = bytearray()
         for page_no in range(1, page_count + 1):
-            raw.extend(self.storage.read_page(self.file_id, page_no))
+            raw.extend(self._read_page(page_no))
         postings: dict[str, dict[str, int]] = {}
         for line in raw.splitlines():
             if not line:
@@ -254,7 +255,15 @@ class InvertedIndex(Index):
             postings[item["term"]] = item["postings"]
         return postings
 
+    def _read_page(self, page_no: int) -> bytes:
+        return bytes(self.buffer.get(self.file_id, page_no).data)
+
+    def _write_page(self, page_no: int, data: bytes) -> None:
+        page = self.buffer.get(self.file_id, page_no)
+        page.data[:] = data
+        page.dirty = True
+
     def _stats(self) -> IOStats:
-        if self.storage is None:
+        if self.buffer is None:
             return IOStats()
-        return self.storage.stats()
+        return self.buffer.stats()

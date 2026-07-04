@@ -61,6 +61,6 @@ Tabla `engine.page` (`docker/postgres/init.sql`): `(file_id TEXT, page_no INTEGE
 
 `core/record.py` define `Schema` (columnas tipadas: `INTEGER`, `FLOAT`, `BOOLEAN`, `VARCHAR`, `BLOB`) y `DynamicRecord`, que empaqueta cada fila con `struct`. Cada campo lleva un byte de nulo al inicio; si no es nulo, los campos de largo fijo usan su formato de `struct` y los de largo variable (`VARCHAR`, `BLOB`) llevan su largo antes del contenido. `VARCHAR` exige `max_length` en bytes utf-8 y lanza error si se excede.
 
-## Nota para la integración
+## Índices conectados al BufferManager
 
-Hoy los índices (`BPlusTreeIndex`, etc.) llaman `storage.stats()` directamente, sin pasar por el `BufferManager`. Cuando se conecte todo en la integración final, los accesos a disco deberían venir del `BufferManager` para aprovechar el cache LRU y el write-back por lotes en vez de ir directo al `StorageEngine`.
+Los cinco índices (`BPlusTreeIndex`, `ISAMIndex`, `ExtendibleHashIndex`, `RTreeIndex`, `InvertedIndex`) reciben un `buffer: BufferManager` en vez de un `storage: StorageEngine`. Internamente cada uno usa dos métodos privados, `_read_page` y `_write_page`, que traducen sus lecturas y escrituras de página a `buffer.get(...)` sobre un `Page` (mutando `page.data` y marcando `page.dirty = True`), y llaman a `buffer.flush(file_id)` después de escribir. Así los accesos a disco pasan siempre por el cache LRU y el write-back por lotes, y nunca van directo al `StorageEngine`. `LRUBufferManager` expone además `allocate_page(file_id)` como paso directo al `StorageEngine`, ya que la asignación de páginas no es responsabilidad del cache.

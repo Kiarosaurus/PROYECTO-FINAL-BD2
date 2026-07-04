@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from indices.ports import EqualityPredicate, KnnPredicate, SpatialRangePredicate
 from indices.rtree import RTreeIndex
-from tests.mocks import MockStorageEngine
+from tests.mocks import MockBufferManager, MockStorageEngine
 
 
 def test_rtree_searches_exact_point_with_library_index() -> None:
@@ -95,7 +95,8 @@ def test_rtree_delete_removes_all_records_at_point() -> None:
 
 def test_rtree_restores_records_from_mock_storage_snapshot() -> None:
     storage = MockStorageEngine()
-    index = RTreeIndex(column="point", storage=storage)
+    buffer = MockBufferManager(storage)
+    index = RTreeIndex(column="point", buffer=buffer)
     index.build(
         [
             {"id": 1, "point": (1.0, 1.0)},
@@ -104,7 +105,7 @@ def test_rtree_restores_records_from_mock_storage_snapshot() -> None:
         ]
     )
 
-    restored = RTreeIndex(column="point", storage=storage)
+    restored = RTreeIndex(column="point", buffer=buffer)
     result = restored.search(
         SpatialRangePredicate(
             column="point",

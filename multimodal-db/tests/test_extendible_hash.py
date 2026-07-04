@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from indices.extendible_hash import ExtendibleHashIndex
 from indices.ports import EqualityPredicate, RangePredicate
-from tests.mocks import MockStorageEngine
+from tests.mocks import MockBufferManager, MockStorageEngine
 
 
 def test_extendible_hash_searches_inserted_records_by_key() -> None:
@@ -19,7 +19,8 @@ def test_extendible_hash_searches_inserted_records_by_key() -> None:
 
 def test_extendible_hash_splits_buckets_and_grows_directory() -> None:
     storage = MockStorageEngine()
-    index = ExtendibleHashIndex(column="id", bucket_capacity=1, storage=storage)
+    buffer = MockBufferManager(storage)
+    index = ExtendibleHashIndex(column="id", bucket_capacity=1, buffer=buffer)
 
     index.build({"id": value, "name": f"row-{value}"} for value in range(1, 9))
 
@@ -86,10 +87,11 @@ def test_extendible_hash_delete_removes_all_records_for_key() -> None:
 
 def test_extendible_hash_restores_directory_from_mock_storage() -> None:
     storage = MockStorageEngine()
-    index = ExtendibleHashIndex(column="id", bucket_capacity=1, storage=storage)
+    buffer = MockBufferManager(storage)
+    index = ExtendibleHashIndex(column="id", bucket_capacity=1, buffer=buffer)
     index.build({"id": value, "name": f"row-{value}"} for value in range(1, 7))
 
-    restored = ExtendibleHashIndex(column="id", bucket_capacity=1, storage=storage)
+    restored = ExtendibleHashIndex(column="id", bucket_capacity=1, buffer=buffer)
     result = restored.search(RangePredicate(column="id", low=2, high=5))
 
     assert restored.bucket_count() == index.bucket_count()
