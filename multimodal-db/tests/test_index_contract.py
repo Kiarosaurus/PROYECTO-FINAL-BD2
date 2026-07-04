@@ -19,6 +19,7 @@ from indices.ports import (
     TextMatchPredicate,
 )
 from indices.rtree import RTreeIndex
+from multimedia.knn_index import MultimediaKNNIndex
 from tests.mocks import MockBufferManager, MockStorageEngine
 
 
@@ -37,6 +38,7 @@ class IndexContractCase:
     deleted_id: Any
     deleted_predicate: Any
     id_field: str = "id"
+    supports_restore: bool = True
 
 
 CONTRACT_CASES = [
@@ -124,7 +126,29 @@ CONTRACT_CASES = [
         deleted_id=3,
         deleted_predicate=TextMatchPredicate(column="body", terms="visual retrieval"),
     ),
+    IndexContractCase(
+        name="knn",
+        factory=lambda buffer=None: MultimediaKNNIndex(),
+        records=[
+            ("1", [1.0, 0.0, 0.0, 0.0]),
+            ("2", [1.0, 1.0, 0.0, 0.0]),
+            ("3", [1.0, 1.0, 1.0, 0.0]),
+            ("4", [0.0, 0.0, 0.0, 1.0]),
+        ],
+        insert_key="5",
+        insert_record=[1.0, 1.0, 1.0, 1.0],
+        search_predicate=KnnPredicate(column="vec", query=[1.0, 0.0, 0.0, 0.0], k=3),
+        search_expected_ids=["1", "2", "3"],
+        limited_predicate=KnnPredicate(column="vec", query=[1.0, 0.0, 0.0, 0.0], k=5),
+        limited_expected_count=2,
+        delete_key="3",
+        deleted_id="3",
+        deleted_predicate=KnnPredicate(column="vec", query=[1.0, 0.0, 0.0, 0.0], k=5),
+        supports_restore=False,
+    ),
 ]
+
+RESTORE_CASES = [case for case in CONTRACT_CASES if case.supports_restore]
 
 
 @pytest.mark.parametrize("case", CONTRACT_CASES, ids=[case.name for case in CONTRACT_CASES])
@@ -152,7 +176,7 @@ def test_index_contract_build_insert_search_and_delete(case: IndexContractCase) 
     assert case.deleted_id not in _ids(deleted_result.records, case.id_field)
 
 
-@pytest.mark.parametrize("case", CONTRACT_CASES, ids=[case.name for case in CONTRACT_CASES])
+@pytest.mark.parametrize("case", RESTORE_CASES, ids=[case.name for case in RESTORE_CASES])
 def test_index_contract_restores_from_mock_storage(case: IndexContractCase) -> None:
     storage = MockStorageEngine()
     buffer = MockBufferManager(storage)
@@ -169,4 +193,13 @@ def test_index_contract_restores_from_mock_storage(case: IndexContractCase) -> N
 
 
 def _ids(records: list[Any], field: str) -> list[Any]:
-    return [record[field] if isinstance(record, dict) else getattr(record, field) for record in records]
+    ids: list[Any] = []
+    for record in records:
+        if isinstance(record, tuple):
+            # Los resultados KNN son tuplas de clave y score
+            ids.append(record[0])
+        elif isinstance(record, dict):
+            ids.append(record[field])
+        else:
+            ids.append(getattr(record, field))
+    return ids

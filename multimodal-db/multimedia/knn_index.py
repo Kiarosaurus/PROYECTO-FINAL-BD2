@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from typing import Iterable
 
@@ -32,8 +33,12 @@ class MultimediaKNNIndex(Index):
         self._add_to_index(str(key), np.asarray(record, dtype=np.float32))
         return OperationResult(affected=1)
 
-    def search(self, predicate: Predicate, k: int | None = 10) -> OperationResult:
-        # predicate es el histograma de la consulta
+    def search(self, predicate: Predicate, k: int | None = None) -> OperationResult:
+        # Acepta un KnnPredicate o el histograma directo
+        if hasattr(predicate, "query"):
+            if k is None:
+                k = getattr(predicate, "k", None)
+            predicate = predicate.query
         query = np.asarray(predicate, dtype=np.float32)
         if len(self._vectors) == 0:
             return OperationResult(records=[])
@@ -88,20 +93,25 @@ class MultimediaKNNIndex(Index):
         return candidates
 
     def save(self, sink: StorageEngine) -> None:
-        # Serializa histogramas y lista invertida en una sola página
-        import pickle
-        data = pickle.dumps({
-            "vectors": self._vectors,
-            "inverted": dict(self._inverted),
-        })
+        # Serializa histogramas y lista invertida como JSON en una página
+        state = {
+            "vectors": {key: vector.tolist() for key, vector in self._vectors.items()},
+            "inverted": {str(word): keys for word, keys in self._inverted.items()},
+        }
+        data = json.dumps(state, separators=(",", ":")).encode("utf-8")
         sink.write_page("knn_index", 0, data)
 
     def load(self, source: StorageEngine) -> None:
         # Trae de vuelta histogramas y lista invertida guardados antes
-        import pickle
         data = source.read_page("knn_index", 0)
         if not data:
             return
-        state = pickle.loads(data)
-        self._vectors = state["vectors"]
-        self._inverted = defaultdict(list, state["inverted"])
+        state = json.loads(data.decode("utf-8"))
+        self._vectors = {
+            key: np.asarray(vector, dtype=np.float32)
+            for key, vector in state["vectors"].items()
+        }
+        self._inverted = defaultdict(
+            list,
+            {int(word): list(keys) for word, keys in state["inverted"].items()},
+        )
