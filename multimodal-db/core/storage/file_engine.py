@@ -39,6 +39,7 @@ class FileStorageEngine(StorageEngine):
             heap_file = HeapFile(
                 self._base_dir / f"{file_id}.heap",
                 self._base_dir / f"{file_id}.dir",
+                self._base_dir / f"{file_id}.free",
             )
             self._files[file_id] = heap_file
         return heap_file

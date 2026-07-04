@@ -5,15 +5,20 @@ from pathlib import Path
 
 # Cada entrada del directorio guarda offset, capacidad y largo real de la pagina
 _DIR_ENTRY = struct.Struct("<QII")
+# Cada entrada libre guarda el offset y la capacidad de un hueco reusable
+_FREE_ENTRY = struct.Struct("<QI")
 
 
 class HeapFile:
 
-    def __init__(self, data_path: Path, dir_path: Path) -> None:
+    def __init__(self, data_path: Path, dir_path: Path, free_path: Path) -> None:
         self._data_path = data_path
         self._dir_path = dir_path
+        self._free_path = free_path
         self._data_path.touch(exist_ok=True)
         self._dir_path.touch(exist_ok=True)
+        self._free_path.touch(exist_ok=True)
+        self._free = self._load_free()
 
     def page_count(self) -> int:
         return self._dir_path.stat().st_size // _DIR_ENTRY.size
@@ -35,9 +40,13 @@ class HeapFile:
             self._write_at(offset, data)
             self._write_entry(page_no, offset, capacity, len(data))
             return
-        # Si no entra, se agrega al final del archivo de datos
-        new_offset = self._append(data)
-        self._write_entry(page_no, new_offset, len(data), len(data))
+        # El hueco que deja esta pagina queda libre para una futura reasignacion
+        if capacity > 0:
+            self._free.append((offset, capacity))
+        new_offset, new_capacity = self._place(len(data))
+        self._write_at(new_offset, data)
+        self._write_entry(page_no, new_offset, new_capacity, len(data))
+        self._save_free()
 
     def allocate_page(self) -> int:
         page_no = self.page_count()
@@ -49,6 +58,27 @@ class HeapFile:
         while self.page_count() <= page_no:
             offset = self._data_path.stat().st_size
             self._write_entry(self.page_count(), offset, 0, 0)
+
+    # Busca el hueco libre mas ajustado que alcance, si no hay ninguno agranda el archivo
+    def _place(self, size: int) -> tuple[int, int]:
+        candidates = [i for i, (_offset, capacity) in enumerate(self._free) if capacity >= size]
+        if not candidates:
+            return self._end_of_file(), size
+        best = min(candidates, key=lambda i: self._free[i][1])
+        return self._free.pop(best)
+
+    def _end_of_file(self) -> int:
+        return self._data_path.stat().st_size
+
+    def _load_free(self) -> list[tuple[int, int]]:
+        raw = self._free_path.read_bytes()
+        count = len(raw) // _FREE_ENTRY.size
+        return [_FREE_ENTRY.unpack_from(raw, i * _FREE_ENTRY.size) for i in range(count)]
+
+    def _save_free(self) -> None:
+        with open(self._free_path, "wb") as free_file:
+            for offset, capacity in self._free:
+                free_file.write(_FREE_ENTRY.pack(offset, capacity))
 
     def _read_entry(self, page_no: int) -> tuple[int, int, int] | None:
         if page_no < 0 or page_no >= self.page_count():
@@ -67,10 +97,3 @@ class HeapFile:
         with open(self._data_path, "r+b") as data_file:
             data_file.seek(offset)
             data_file.write(data)
-
-    def _append(self, data: bytes) -> int:
-        with open(self._data_path, "r+b") as data_file:
-            data_file.seek(0, 2)
-            offset = data_file.tell()
-            data_file.write(data)
-        return offset
