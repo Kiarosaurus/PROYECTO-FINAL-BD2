@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 
+from core.metrics import IOStats
 from core.ports.buffer import BufferManager, Page
 from core.ports.storage import StorageEngine
 
@@ -40,6 +41,10 @@ class LRUBufferManager(BufferManager):
             if file_id is not None and page.file_id != file_id:
                 continue
             self._flush_page(page)
+
+    # Un solo IOStats por StorageEngine, nadie mas lleva su propio contador
+    def stats(self) -> IOStats:
+        return self._storage.stats()
 
     # Desaloja las paginas menos usadas hasta volver a estar dentro de la capacidad
     def _make_room(self, protect: tuple[str, int] | None = None) -> None:
