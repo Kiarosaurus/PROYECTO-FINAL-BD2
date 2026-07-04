@@ -61,7 +61,10 @@ class BPlusTreeIndex(Index):
         return OperationResult(affected=1, io=self._stats())
 
     def search(self, predicate: SearchPredicate | Any, k: int | None = None) -> OperationResult:
-        if isinstance(predicate, EqualityPredicate):
+        if predicate is None:
+            # Sin condición se devuelven todas las filas en orden de clave
+            records = [record for _key, values in self._iter_entries() for record in values]
+        elif isinstance(predicate, EqualityPredicate):
             records = self._search_key(predicate.value)
         elif isinstance(predicate, RangePredicate):
             records = self._search_range(predicate)

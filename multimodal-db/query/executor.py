@@ -25,7 +25,16 @@ class QueryExecutor(Executor):
 
     def execute(self, plan: QueryPlan) -> ResultSet:
         start = time.perf_counter()
+        stats = self._storage.stats()
+        reads, writes, allocs = stats.disk_reads, stats.disk_writes, stats.pages_allocated
         result = self._dispatch(plan)
+        # El costo de la consulta es lo que crecieron los contadores del storage
+        stats = self._storage.stats()
+        result.io = IOStats(
+            disk_reads=stats.disk_reads - reads,
+            disk_writes=stats.disk_writes - writes,
+            pages_allocated=stats.pages_allocated - allocs,
+        )
         result.elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
         result.index_type = plan.index_type
         if plan.predicate is not None:
@@ -60,7 +69,11 @@ class QueryExecutor(Executor):
 
     def _create_index(self, plan: QueryPlan) -> ResultSet:
         index_type = IndexType.from_name(plan.index_type)
-        schema = self._tables.get(plan.table, [])
+        schema = {
+            "table": plan.table,
+            "column": plan.columns[0],
+            "columns": self._tables.get(plan.table, []),
+        }
         index = self._factory.create(index_type, schema, self._storage)
         self._indexes[(plan.table, plan.columns[0])] = index
         return ResultSet()
@@ -90,7 +103,6 @@ class QueryExecutor(Executor):
         return ResultSet(columns=["affected"], rows=[(affected,)])
 
     def _select(self, plan: QueryPlan) -> ResultSet:
-        io = IOStats()
         pred = plan.predicate
         if pred is not None:
             index = self._indexes.get((plan.table, pred.column))
@@ -100,9 +112,8 @@ class QueryExecutor(Executor):
         if index is not None:
             result = index.search(pred, plan.k)
             records = result.records
-            io.merge(result.io)
         columns, rows = self._project(plan, records)
-        return ResultSet(columns=columns, rows=rows, io=io)
+        return ResultSet(columns=columns, rows=rows)
 
     # Busca cualquier índice de la tabla para un escaneo sin filtro
     def _any_index(self, table: str) -> Any:

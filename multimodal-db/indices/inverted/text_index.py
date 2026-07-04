@@ -71,6 +71,12 @@ class InvertedIndex(Index):
         return OperationResult(affected=1, io=self._stats())
 
     def search(self, predicate: TextMatchPredicate | Any, k: int | None = None) -> OperationResult:
+        if predicate is None:
+            # Sin condición se devuelven todos los documentos
+            records = list(self._documents.values())
+            if k is not None:
+                records = records[:k]
+            return OperationResult(records=records, io=self._stats())
         terms = self.preprocessor.tokenize(
             predicate.terms if isinstance(predicate, TextMatchPredicate) else str(predicate)
         )

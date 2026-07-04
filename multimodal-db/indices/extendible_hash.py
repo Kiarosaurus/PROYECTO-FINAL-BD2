@@ -54,7 +54,18 @@ class ExtendibleHashIndex(Index):
         return OperationResult(affected=1, io=self._stats())
 
     def search(self, predicate: SearchPredicate | Any, k: int | None = None) -> OperationResult:
-        if isinstance(predicate, EqualityPredicate):
+        if predicate is None:
+            # Sin condición se juntan todos los buckets ordenados por clave
+            records = sorted(
+                (
+                    record
+                    for bucket in self._unique_buckets()
+                    for values in bucket.entries.values()
+                    for record in values
+                ),
+                key=self._record_key,
+            )
+        elif isinstance(predicate, EqualityPredicate):
             records = self._search_key(predicate.value)
         elif isinstance(predicate, RangePredicate):
             records = self._search_range(predicate)

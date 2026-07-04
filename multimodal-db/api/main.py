@@ -11,10 +11,12 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.models import ErrorResponse
+from core.ports.storage import StorageEngine
+from core.storage.file_engine import FileStorageEngine
 from query.parser.sql_parser import SqlParser
 from query.planner import QueryPlanner
 from query.executor import QueryExecutor
-from tests.mocks import MockIndexFactory, MockStorageEngine
+from query.index_factory import EngineIndexFactory
 
 # Rutas que se cargan solo si su módulo está presente
 _ROUTE_MODULES = [
@@ -42,6 +44,16 @@ _ERROR_LABELS = {
 }
 
 
+# Elige el medio de almacenamiento según el entorno
+def _build_storage() -> StorageEngine:
+    backend = os.environ.get("STORAGE_BACKEND", "file").lower()
+    if backend == "postgres":
+        from core.storage.postgres_engine import PostgresStorageEngine
+
+        return PostgresStorageEngine(os.environ["POSTGRES_DSN"])
+    return FileStorageEngine(os.environ.get("ENGINE_DATA_DIR", "engine_data"))
+
+
 # Devuelve cualquier error con el mismo formato
 def _error_response(status_code: int, detail: str) -> JSONResponse:
     label = _ERROR_LABELS.get(status_code, "error")
@@ -60,7 +72,7 @@ def create_app() -> FastAPI:
     )
     app.state.parser = SqlParser()
     app.state.planner = QueryPlanner()
-    app.state.executor = QueryExecutor(MockIndexFactory(), MockStorageEngine())
+    app.state.executor = QueryExecutor(EngineIndexFactory(), _build_storage())
     app.state.upload_dir = Path("uploads")
     app.state.upload_dir.mkdir(exist_ok=True)
 

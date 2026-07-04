@@ -37,3 +37,54 @@ class IndexFactory(ABC):
         storage: StorageEngine,
     ) -> Index:
         ...
+
+
+# Fábrica que entrega los índices reales del engine
+class EngineIndexFactory(IndexFactory):
+
+    def __init__(self, buffer_capacity: int = 64) -> None:
+        self._buffer_capacity = buffer_capacity
+        # Un solo buffer por storage para que el I/O se cuente en un solo lugar
+        self._buffers: dict[int, Any] = {}
+
+    def create(
+        self,
+        index_type: IndexType,
+        schema: Schema,
+        storage: StorageEngine,
+    ) -> Index:
+        from indices.bplus_tree import BPlusTreeIndex
+        from indices.extendible_hash import ExtendibleHashIndex
+        from indices.inverted.text_index import InvertedIndex
+        from indices.isam import ISAMIndex
+        from indices.rtree import RTreeIndex
+        from multimedia.knn_index import MultimediaKNNIndex
+
+        if index_type is IndexType.KNN:
+            return MultimediaKNNIndex()
+        table, column = self._table_and_column(schema)
+        buffer = self._buffer_for(storage)
+        file_id = f"{index_type.value}_{table}_{column}"
+        if index_type is IndexType.BPLUS:
+            return BPlusTreeIndex(column=column, buffer=buffer, file_id=file_id)
+        if index_type is IndexType.ISAM:
+            return ISAMIndex(column=column, buffer=buffer, file_id=file_id)
+        if index_type is IndexType.HASH:
+            return ExtendibleHashIndex(column=column, buffer=buffer, file_id=file_id)
+        if index_type is IndexType.RTREE:
+            return RTreeIndex(column=column, buffer=buffer, file_id=file_id)
+        return InvertedIndex(column=column, buffer=buffer, file_id=file_id)
+
+    def _buffer_for(self, storage: StorageEngine) -> Any:
+        from core.buffer.lru_buffer import LRUBufferManager
+
+        buffer = self._buffers.get(id(storage))
+        if buffer is None:
+            buffer = LRUBufferManager(storage, capacity=self._buffer_capacity)
+            self._buffers[id(storage)] = buffer
+        return buffer
+
+    def _table_and_column(self, schema: Schema) -> tuple[str, str]:
+        if isinstance(schema, dict):
+            return str(schema.get("table", "t")), str(schema.get("column", "col"))
+        return "t", "col"

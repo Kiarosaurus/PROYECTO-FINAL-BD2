@@ -34,6 +34,12 @@ class MultimediaKNNIndex(Index):
         return OperationResult(affected=1)
 
     def search(self, predicate: Predicate, k: int | None = None) -> OperationResult:
+        if predicate is None:
+            # Sin condición se devuelven todas las claves guardadas
+            keys = list(self._vectors)
+            if k is not None:
+                keys = keys[:k]
+            return OperationResult(records=[(key, 0.0) for key in keys])
         # Acepta un KnnPredicate o el histograma directo
         if hasattr(predicate, "query"):
             if k is None:

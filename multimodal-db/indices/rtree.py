@@ -60,7 +60,10 @@ class RTreeIndex(Index):
         return OperationResult(affected=1, io=self._stats())
 
     def search(self, predicate: SearchPredicate | Any, k: int | None = None) -> OperationResult:
-        if isinstance(predicate, SpatialRangePredicate):
+        if predicate is None:
+            # Sin condición se devuelven todos los puntos ordenados
+            records = sorted(self._records.values(), key=self._record_point)
+        elif isinstance(predicate, SpatialRangePredicate):
             records = self._range_search(predicate.min_corner, predicate.max_corner)
         elif isinstance(predicate, KnnPredicate):
             records = self._knn_search(predicate.query, predicate.k)

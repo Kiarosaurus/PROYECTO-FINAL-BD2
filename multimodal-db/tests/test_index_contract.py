@@ -176,6 +176,18 @@ def test_index_contract_build_insert_search_and_delete(case: IndexContractCase) 
     assert case.deleted_id not in _ids(deleted_result.records, case.id_field)
 
 
+@pytest.mark.parametrize("case", CONTRACT_CASES, ids=[case.name for case in CONTRACT_CASES])
+def test_index_contract_full_scan_returns_every_record(case: IndexContractCase) -> None:
+    index = case.factory(None)
+    index.build(case.records)
+
+    result = index.search(None)
+
+    expected = sorted(str(value) for value in _ids(case.records, case.id_field))
+    got = sorted(str(value) for value in _ids(result.records, case.id_field))
+    assert got == expected
+
+
 @pytest.mark.parametrize("case", RESTORE_CASES, ids=[case.name for case in RESTORE_CASES])
 def test_index_contract_restores_from_mock_storage(case: IndexContractCase) -> None:
     storage = MockStorageEngine()

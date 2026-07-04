@@ -32,8 +32,9 @@ El SQL pasa por tres etapas:
 SQL soportado:
 
 ```sql
-CREATE TABLE img (id INT, path TEXT, feat VECTOR)
-CREATE INDEX ON img (feat) USING rtree
+CREATE TABLE img (id INT, path TEXT, feat VECTOR, box VECTOR)
+CREATE INDEX ON img (feat) USING knn
+CREATE INDEX ON img (box) USING rtree
 INSERT INTO img (id, path) VALUES (1, "a.jpg")
 DELETE FROM img WHERE id = 5
 SELECT * FROM img WHERE id BETWEEN 1 AND 9 LIMIT 10

@@ -74,7 +74,14 @@ class ISAMIndex(Index):
         return OperationResult(affected=1, io=self._stats())
 
     def search(self, predicate: SearchPredicate | Any, k: int | None = None) -> OperationResult:
-        if isinstance(predicate, EqualityPredicate):
+        if predicate is None:
+            # Sin condición se recorren todas las páginas en orden
+            records = [
+                record
+                for page in self._primary_pages
+                for record in self._page_records(page)
+            ]
+        elif isinstance(predicate, EqualityPredicate):
             records = self._search_key(predicate.value)
         elif isinstance(predicate, RangePredicate):
             records = self._search_range(predicate)
