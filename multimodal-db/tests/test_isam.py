@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from indices.isam import ISAMIndex
 from indices.ports import EqualityPredicate, RangePredicate
-from tests.mocks import MockStorageEngine
+from tests.mocks import MockBufferManager, MockStorageEngine
 
 
 def test_isam_builds_static_primary_pages_and_searches_by_key() -> None:
@@ -44,11 +44,12 @@ def test_isam_range_scan_respects_open_bounds_and_limit() -> None:
 
 def test_isam_insert_uses_overflow_when_static_page_is_full() -> None:
     storage = MockStorageEngine()
+    buffer = MockBufferManager(storage)
     index = ISAMIndex(
         column="id",
         page_capacity=2,
         overflow_capacity=2,
-        storage=storage,
+        buffer=buffer,
     )
     index.build([{"id": 1}, {"id": 2}, {"id": 5}, {"id": 6}])
 
@@ -95,11 +96,12 @@ def test_isam_delete_removes_records_from_primary_and_overflow() -> None:
 
 def test_isam_restores_static_pages_and_overflow_from_mock_storage() -> None:
     storage = MockStorageEngine()
-    index = ISAMIndex(column="id", page_capacity=2, overflow_capacity=2, storage=storage)
+    buffer = MockBufferManager(storage)
+    index = ISAMIndex(column="id", page_capacity=2, overflow_capacity=2, buffer=buffer)
     index.build([{"id": 1}, {"id": 2}, {"id": 5}, {"id": 6}])
     index.insert(2, {"id": 2, "name": "overflow"})
 
-    restored = ISAMIndex(column="id", page_capacity=2, overflow_capacity=2, storage=storage)
+    restored = ISAMIndex(column="id", page_capacity=2, overflow_capacity=2, buffer=buffer)
     result = restored.search(RangePredicate(column="id", low=1, high=5))
 
     assert restored.overflow_page_count() == 1

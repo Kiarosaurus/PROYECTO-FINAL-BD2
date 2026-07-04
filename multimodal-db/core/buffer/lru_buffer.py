@@ -44,6 +44,10 @@ class LRUBufferManager(BufferManager):
     def stats(self) -> IOStats:
         return self._storage.stats()
 
+    # Pasa la asignacion de paginas al StorageEngine, el buffer no reserva espacio
+    def allocate_page(self, file_id: str) -> int:
+        return self._storage.allocate_page(file_id)
+
     # Primero se eligen todas las victimas, recien despues se escriben juntas
     def _make_room(self, protect: tuple[str, int] | None = None) -> None:
         overflow = len(self._cache) - self._capacity

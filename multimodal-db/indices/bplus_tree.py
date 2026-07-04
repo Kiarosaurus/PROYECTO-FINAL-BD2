@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 from core.metrics import IOStats, OperationResult
+from core.ports.buffer import BufferManager
 from core.ports.index import Index
-from core.ports.storage import StorageEngine
 from indices.ports import EqualityPredicate, RangePredicate, SearchPredicate
 
 
@@ -33,7 +33,7 @@ class BPlusTreeIndex(Index):
         self,
         column: str,
         order: int = 4,
-        storage: StorageEngine | None = None,
+        buffer: BufferManager | None = None,
         file_id: str | None = None,
     ) -> None:
         if order < 3:
@@ -41,7 +41,7 @@ class BPlusTreeIndex(Index):
         self.column = column
         self.order = order
         self.max_keys = order - 1
-        self.storage = storage
+        self.buffer = buffer
         self.file_id = file_id or f"bplus_{column}"
         self.root: _Node = _LeafNode()
         self._load_snapshot()
@@ -201,7 +201,7 @@ class BPlusTreeIndex(Index):
             leaf = leaf.next
 
     def _persist_snapshot(self) -> None:
-        if self.storage is None:
+        if self.buffer is None:
             return
         payload = {
             "column": self.column,
@@ -214,12 +214,13 @@ class BPlusTreeIndex(Index):
             encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         except (TypeError, ValueError):
             return
-        self.storage.write_page(self.file_id, 0, encoded)
+        self._write_page(0, encoded)
+        self.buffer.flush(self.file_id)
 
     def _load_snapshot(self) -> None:
-        if self.storage is None:
+        if self.buffer is None:
             return
-        raw = self.storage.read_page(self.file_id, 0)
+        raw = self._read_page(0)
         if not raw:
             return
         try:
@@ -233,7 +234,15 @@ class BPlusTreeIndex(Index):
             for record in entry.get("records", []):
                 self._insert_record(key, record)
 
+    def _read_page(self, page_no: int) -> bytes:
+        return bytes(self.buffer.get(self.file_id, page_no).data)
+
+    def _write_page(self, page_no: int, data: bytes) -> None:
+        page = self.buffer.get(self.file_id, page_no)
+        page.data[:] = data
+        page.dirty = True
+
     def _stats(self) -> IOStats:
-        if self.storage is None:
+        if self.buffer is None:
             return IOStats()
-        return self.storage.stats()
+        return self.buffer.stats()

@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 from core.metrics import IOStats, OperationResult
+from core.ports.buffer import BufferManager
 from core.ports.index import Index
-from core.ports.storage import StorageEngine
 from indices.ports import EqualityPredicate, RangePredicate, SearchPredicate
 
 
@@ -31,7 +31,7 @@ class ISAMIndex(Index):
         column: str,
         page_capacity: int = 4,
         overflow_capacity: int = 3,
-        storage: StorageEngine | None = None,
+        buffer: BufferManager | None = None,
         file_id: str | None = None,
     ) -> None:
         if page_capacity < 1:
@@ -41,7 +41,7 @@ class ISAMIndex(Index):
         self.column = column
         self.page_capacity = page_capacity
         self.overflow_capacity = overflow_capacity
-        self.storage = storage
+        self.buffer = buffer
         self.file_id = file_id or f"isam_{column}"
         self._primary_pages: list[_PrimaryPage] = []
         self._overflow_pages: list[_OverflowPage] = []
@@ -151,8 +151,8 @@ class ISAMIndex(Index):
     def _new_overflow_page(self, record: Any) -> int:
         page_no = len(self._overflow_pages)
         self._overflow_pages.append(_OverflowPage(records=[record]))
-        if self.storage is not None:
-            self.storage.allocate_page(f"{self.file_id}_overflow")
+        if self.buffer is not None:
+            self.buffer.allocate_page(f"{self.file_id}_overflow")
         return page_no
 
     def _search_key(self, key: Any) -> list[Any]:
@@ -196,7 +196,7 @@ class ISAMIndex(Index):
         return getattr(record, self.column)
 
     def _persist_snapshot(self) -> None:
-        if self.storage is None:
+        if self.buffer is None:
             return
         payload = {
             "column": self.column,
@@ -219,12 +219,13 @@ class ISAMIndex(Index):
             encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         except (TypeError, ValueError):
             return
-        self.storage.write_page(self.file_id, 0, encoded)
+        self._write_page(0, encoded)
+        self.buffer.flush(self.file_id)
 
     def _load_snapshot(self) -> None:
-        if self.storage is None:
+        if self.buffer is None:
             return
-        raw = self.storage.read_page(self.file_id, 0)
+        raw = self._read_page(0)
         if not raw:
             return
         try:
@@ -249,7 +250,15 @@ class ISAMIndex(Index):
             for page in payload.get("overflow_pages", [])
         ]
 
+    def _read_page(self, page_no: int) -> bytes:
+        return bytes(self.buffer.get(self.file_id, page_no).data)
+
+    def _write_page(self, page_no: int, data: bytes) -> None:
+        page = self.buffer.get(self.file_id, page_no)
+        page.data[:] = data
+        page.dirty = True
+
     def _stats(self) -> IOStats:
-        if self.storage is None:
+        if self.buffer is None:
             return IOStats()
-        return self.storage.stats()
+        return self.buffer.stats()

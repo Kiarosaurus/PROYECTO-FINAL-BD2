@@ -67,6 +67,12 @@ class MockBufferManager(BufferManager):
                 self._storage.write_page(fid, page_no, bytes(page.data))
                 page.dirty = False
 
+    def stats(self) -> IOStats:
+        return self._storage.stats()
+
+    def allocate_page(self, file_id: str) -> int:
+        return self._storage.allocate_page(file_id)
+
 
 # Guarda las filas en una lista
 class MockIndex(Index):

@@ -19,13 +19,13 @@ from indices.ports import (
     TextMatchPredicate,
 )
 from indices.rtree import RTreeIndex
-from tests.mocks import MockStorageEngine
+from tests.mocks import MockBufferManager, MockStorageEngine
 
 
 @dataclass(frozen=True)
 class IndexContractCase:
     name: str
-    factory: Callable[[MockStorageEngine | None], Index]
+    factory: Callable[[MockBufferManager | None], Index]
     records: list[Any]
     insert_key: Any
     insert_record: Any
@@ -42,7 +42,7 @@ class IndexContractCase:
 CONTRACT_CASES = [
     IndexContractCase(
         name="bplus",
-        factory=lambda storage=None: BPlusTreeIndex(column="id", order=4, storage=storage),
+        factory=lambda buffer=None: BPlusTreeIndex(column="id", order=4, buffer=buffer),
         records=[{"id": value, "name": f"row-{value}"} for value in [1, 2, 3, 4]],
         insert_key=5,
         insert_record={"id": 5, "name": "row-5"},
@@ -56,7 +56,7 @@ CONTRACT_CASES = [
     ),
     IndexContractCase(
         name="isam",
-        factory=lambda storage=None: ISAMIndex(column="id", page_capacity=2, storage=storage),
+        factory=lambda buffer=None: ISAMIndex(column="id", page_capacity=2, buffer=buffer),
         records=[{"id": value, "name": f"row-{value}"} for value in [1, 2, 3, 4]],
         insert_key=5,
         insert_record={"id": 5, "name": "row-5"},
@@ -70,7 +70,7 @@ CONTRACT_CASES = [
     ),
     IndexContractCase(
         name="hash",
-        factory=lambda storage=None: ExtendibleHashIndex(column="id", bucket_capacity=2, storage=storage),
+        factory=lambda buffer=None: ExtendibleHashIndex(column="id", bucket_capacity=2, buffer=buffer),
         records=[{"id": value, "name": f"row-{value}"} for value in [1, 2, 3, 4]],
         insert_key=5,
         insert_record={"id": 5, "name": "row-5"},
@@ -84,7 +84,7 @@ CONTRACT_CASES = [
     ),
     IndexContractCase(
         name="rtree",
-        factory=lambda storage=None: RTreeIndex(column="point", storage=storage),
+        factory=lambda buffer=None: RTreeIndex(column="point", buffer=buffer),
         records=[
             {"id": 1, "point": (1.0, 1.0)},
             {"id": 2, "point": (2.0, 2.0)},
@@ -107,7 +107,7 @@ CONTRACT_CASES = [
     ),
     IndexContractCase(
         name="inverted",
-        factory=lambda storage=None: InvertedIndex(column="body", block_document_limit=2, storage=storage),
+        factory=lambda buffer=None: InvertedIndex(column="body", block_document_limit=2, buffer=buffer),
         records=[
             {"id": 1, "body": "visual database search"},
             {"id": 2, "body": "audio retrieval engine"},
@@ -155,11 +155,12 @@ def test_index_contract_build_insert_search_and_delete(case: IndexContractCase) 
 @pytest.mark.parametrize("case", CONTRACT_CASES, ids=[case.name for case in CONTRACT_CASES])
 def test_index_contract_restores_from_mock_storage(case: IndexContractCase) -> None:
     storage = MockStorageEngine()
-    index = case.factory(storage)
+    buffer = MockBufferManager(storage)
+    index = case.factory(buffer)
 
     build_result = index.build(case.records)
     index.insert(case.insert_key, case.insert_record)
-    restored = case.factory(storage)
+    restored = case.factory(buffer)
     search_result = restored.search(case.search_predicate)
 
     assert build_result.success

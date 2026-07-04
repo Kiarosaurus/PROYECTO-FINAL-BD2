@@ -4,7 +4,7 @@ from indices.inverted.spimi_builder import SPIMIBlockBuilder
 from indices.inverted.text_index import InvertedIndex
 from indices.inverted.text_preprocessor import TextPreprocessor
 from indices.ports import TextMatchPredicate
-from tests.mocks import MockStorageEngine
+from tests.mocks import MockBufferManager, MockStorageEngine
 
 
 def test_spimi_builder_flushes_blocks_and_merges_terms_with_heap() -> None:
@@ -117,7 +117,8 @@ def test_inverted_index_computes_document_norms() -> None:
 
 def test_inverted_index_restores_snapshot_from_mock_storage() -> None:
     storage = MockStorageEngine()
-    index = InvertedIndex(column="body", block_document_limit=2, storage=storage)
+    buffer = MockBufferManager(storage)
+    index = InvertedIndex(column="body", block_document_limit=2, buffer=buffer)
     index.build(
         [
             {"id": 1, "body": "alpha beta"},
@@ -125,7 +126,7 @@ def test_inverted_index_restores_snapshot_from_mock_storage() -> None:
         ]
     )
 
-    restored = InvertedIndex(column="body", block_document_limit=2, storage=storage)
+    restored = InvertedIndex(column="body", block_document_limit=2, buffer=buffer)
     result = restored.search(TextMatchPredicate(column="body", terms="beta"))
 
     assert storage.stats().disk_writes > 0
@@ -135,7 +136,8 @@ def test_inverted_index_restores_snapshot_from_mock_storage() -> None:
 
 def test_inverted_index_streams_postings_across_storage_pages() -> None:
     storage = MockStorageEngine()
-    index = InvertedIndex(column="body", block_document_limit=10, storage=storage)
+    buffer = MockBufferManager(storage)
+    index = InvertedIndex(column="body", block_document_limit=10, buffer=buffer)
     records = [
         {
             "id": doc_id,
@@ -145,7 +147,7 @@ def test_inverted_index_streams_postings_across_storage_pages() -> None:
     ]
 
     index.build(records)
-    restored = InvertedIndex(column="body", block_document_limit=10, storage=storage)
+    restored = InvertedIndex(column="body", block_document_limit=10, buffer=buffer)
     result = restored.search(TextMatchPredicate(column="body", terms="term10_7"))
 
     assert index.posting_page_count() > 1
