@@ -48,6 +48,8 @@ class InvertedIndex(Index):
         builder = SPIMIBlockBuilder(
             block_document_limit=self.block_document_limit,
             preprocessor=self.preprocessor,
+            buffer=self.buffer,
+            file_id=f"{self.file_id}_spimi",
         )
         self._postings = builder.build(documents)
         self._last_block_count = builder.block_count()

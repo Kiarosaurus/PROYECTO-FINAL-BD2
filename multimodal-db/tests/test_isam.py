@@ -80,6 +80,17 @@ def test_isam_chains_multiple_overflow_pages() -> None:
     ]
 
 
+def test_isam_finds_duplicates_that_continue_on_the_next_page() -> None:
+    index = ISAMIndex(column="id", page_capacity=3)
+    index.build([{"id": value} for value in [1, 2, 2, 2, 3]])
+
+    found = index.search(EqualityPredicate(column="id", value=2))
+    deleted = index.delete(2)
+
+    assert len(found.records) == 3
+    assert deleted.affected == 3
+
+
 def test_isam_delete_removes_records_from_primary_and_overflow() -> None:
     index = ISAMIndex(column="id", page_capacity=2, overflow_capacity=2)
     index.build([{"id": 1}, {"id": 2}, {"id": 5}, {"id": 6}])

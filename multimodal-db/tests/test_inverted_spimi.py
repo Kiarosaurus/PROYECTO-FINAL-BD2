@@ -25,6 +25,44 @@ def test_spimi_builder_flushes_blocks_and_merges_terms_with_heap() -> None:
     assert postings["gamma"] == {"2": 1, "3": 1, "4": 2}
 
 
+def test_spimi_builder_spills_closed_blocks_to_storage_pages() -> None:
+    storage = MockStorageEngine()
+    buffer = MockBufferManager(storage)
+    builder = SPIMIBlockBuilder(block_document_limit=2, buffer=buffer, file_id="spimi_spill")
+
+    postings = builder.build(
+        [
+            ("1", "alpha beta beta"),
+            ("2", "beta gamma"),
+            ("3", "alpha gamma"),
+            ("4", "gamma gamma"),
+        ]
+    )
+
+    assert builder.block_count() == 2
+    assert storage.stats().disk_writes > 0
+    assert postings["alpha"] == {"1": 1, "3": 1}
+    assert postings["beta"] == {"1": 2, "2": 1}
+    assert postings["gamma"] == {"2": 1, "3": 1, "4": 2}
+
+
+def test_spimi_builder_streams_large_blocks_across_multiple_pages() -> None:
+    storage = MockStorageEngine()
+    buffer = MockBufferManager(storage)
+    builder = SPIMIBlockBuilder(block_document_limit=50, buffer=buffer, file_id="spimi_pages")
+    documents = [
+        (str(doc_id), " ".join(f"w{doc_id}x{term_id}" for term_id in range(40)))
+        for doc_id in range(1, 31)
+    ]
+
+    postings = builder.build(documents)
+
+    assert builder.block_count() == 1
+    assert storage.stats().disk_writes > 1
+    assert postings["w10x7"] == {"10": 1}
+    assert len(postings) == 30 * 40
+
+
 def test_text_preprocessor_removes_stopwords_and_stems_terms() -> None:
     preprocessor = TextPreprocessor()
 

@@ -125,12 +125,10 @@ class ISAMIndex(Index):
         page = self._find_page(key)
         pages = [page]
         page_pos = self._primary_pages.index(page)
-        while page_pos + 1 < len(self._primary_pages):
-            next_page = self._primary_pages[page_pos + 1]
-            if next_page.high_key != key:
-                break
-            pages.append(next_page)
+        # Si la última clave de una página es la buscada, los duplicados pueden seguir en la próxima
+        while page_pos + 1 < len(self._primary_pages) and self._primary_pages[page_pos].high_key == key:
             page_pos += 1
+            pages.append(self._primary_pages[page_pos])
         return pages
 
     def _append_overflow_record(self, page: _PrimaryPage, record: Any) -> None:
