@@ -63,3 +63,16 @@ class KMeansCodebook(Codebook):
             "idf": self._idf,
         })
         sink.write_page("codebook", 0, data)
+
+    def load(self, source: StorageEngine) -> None:
+        # Trae de vuelta centroides y estado guardados antes
+        import pickle
+        data = source.read_page("codebook", 0)
+        if not data:
+            return
+        state = pickle.loads(data)
+        self._k = state["k"]
+        self._fitted = state["fitted"]
+        self._idf = state["idf"]
+        if state["kmeans"] is not None:
+            self._kmeans = state["kmeans"]

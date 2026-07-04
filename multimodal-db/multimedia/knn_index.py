@@ -7,6 +7,7 @@ import numpy as np
 
 from core.metrics import IOStats, OperationResult
 from core.ports.index import Index, Key, Predicate, Record
+from core.ports.storage import StorageEngine
 
 
 class MultimediaKNNIndex(Index):
@@ -85,3 +86,22 @@ class MultimediaKNNIndex(Index):
         if len(candidates) < min_candidates:
             return set()
         return candidates
+
+    def save(self, sink: StorageEngine) -> None:
+        # Serializa histogramas y lista invertida en una sola página
+        import pickle
+        data = pickle.dumps({
+            "vectors": self._vectors,
+            "inverted": dict(self._inverted),
+        })
+        sink.write_page("knn_index", 0, data)
+
+    def load(self, source: StorageEngine) -> None:
+        # Trae de vuelta histogramas y lista invertida guardados antes
+        import pickle
+        data = source.read_page("knn_index", 0)
+        if not data:
+            return
+        state = pickle.loads(data)
+        self._vectors = state["vectors"]
+        self._inverted = defaultdict(list, state["inverted"])
