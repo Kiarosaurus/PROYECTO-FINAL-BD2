@@ -83,6 +83,27 @@ def test_session_with_catalog_makes_planner_respect_created_index(tmp_path: Path
     assert result.index_type == "bplus"
 
 
+def test_sql_text_match_ranks_documents_by_relevance(tmp_path: Path) -> None:
+    executor = QueryExecutor(EngineIndexFactory(), FileStorageEngine(tmp_path))
+    session = Session(SqlParser(), QueryPlanner(), executor, Catalog())
+
+    session.execute("CREATE TABLE docs (id INT, body TEXT)")
+    session.execute("CREATE INDEX ON docs (body) USING inverted")
+    session.execute(
+        'INSERT INTO docs (id, body) VALUES '
+        '(1, "visual search database"), '
+        '(2, "audio retrieval engine"), '
+        '(3, "visual retrieval engine"), '
+        '(4, "database storage engine")'
+    )
+    result = session.execute('SELECT id FROM docs WHERE MATCH(body, "visual search", 3)')
+
+    # El documento con ambos términos queda primero
+    assert result.rows == [(1,), (3,)]
+    assert result.index_type == "inverted"
+    assert result.predicate_kind == "text_match"
+
+
 def _write_noise_image(path: Path, seed: int) -> None:
     rng = np.random.default_rng(seed)
     image = rng.integers(0, 255, size=(64, 64), dtype=np.uint8)

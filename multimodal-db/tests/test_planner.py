@@ -8,6 +8,7 @@ from indices.ports import (
     KnnPredicate,
     RangePredicate,
     SpatialRangePredicate,
+    TextMatchPredicate,
 )
 
 
@@ -125,6 +126,26 @@ def test_select_spatial_uses_rtree(plan):
     assert isinstance(q.predicate, SpatialRangePredicate)
     assert q.predicate.min_corner == [0, 0]
     assert q.index_type == "rtree"
+
+
+def test_select_match_uses_inverted(plan):
+    q = plan('SELECT * FROM docs WHERE MATCH(body, "visual search", 3)')
+    assert isinstance(q.predicate, TextMatchPredicate)
+    assert q.predicate.terms == "visual search"
+    assert q.index_type == "inverted"
+    assert q.k == 3
+
+
+def test_select_match_k_overrides_limit(plan):
+    q = plan('SELECT * FROM docs WHERE MATCH(body, "visual", 2) LIMIT 9')
+    assert q.k == 2
+
+
+def test_select_match_without_k_uses_limit(plan):
+    q = plan('SELECT * FROM docs WHERE MATCH(body, "visual") LIMIT 7')
+    assert isinstance(q.predicate, TextMatchPredicate)
+    assert q.predicate.k is None
+    assert q.k == 7
 
 
 def test_unsupported_operator_raises(plan):

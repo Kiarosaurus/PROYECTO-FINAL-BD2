@@ -70,20 +70,27 @@ class InvertedIndex(Index):
         self._persist_snapshot()
         return OperationResult(affected=1, io=self._stats())
 
-    def search(self, predicate: TextMatchPredicate | Any, k: int | None = None) -> OperationResult:
+    def search(self, predicate: TextMatchPredicate | str | None, k: int | None = None) -> OperationResult:
         if predicate is None:
             # Sin condición se devuelven todos los documentos
             records = list(self._documents.values())
             if k is not None:
                 records = records[:k]
             return OperationResult(records=records, io=self._stats())
-        terms = self.preprocessor.tokenize(
-            predicate.terms if isinstance(predicate, TextMatchPredicate) else str(predicate)
-        )
+        # Solo se acepta el predicado de texto o la consulta como texto plano
+        if isinstance(predicate, TextMatchPredicate):
+            query = predicate.terms
+        elif isinstance(predicate, str):
+            query = predicate
+        else:
+            return OperationResult.failure(
+                f"predicado no soportado por InvertedIndex: {type(predicate).__name__}"
+            )
+        terms = self.preprocessor.tokenize(query)
         if not terms:
             return OperationResult(records=[], io=self._stats())
         limit = k if k is not None else getattr(predicate, "k", None)
-        ranked = self.rank(predicate.terms if isinstance(predicate, TextMatchPredicate) else str(predicate), limit)
+        ranked = self.rank(query, limit)
         records = [self._documents[doc_id] for doc_id, _score in ranked if doc_id in self._documents]
         return OperationResult(records=records, io=self._stats())
 

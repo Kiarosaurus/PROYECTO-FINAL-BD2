@@ -3,7 +3,7 @@ from __future__ import annotations
 from indices.inverted.spimi_builder import SPIMIBlockBuilder
 from indices.inverted.text_index import InvertedIndex
 from indices.inverted.text_preprocessor import TextPreprocessor
-from indices.ports import TextMatchPredicate
+from indices.ports import EqualityPredicate, TextMatchPredicate
 from tests.mocks import MockBufferManager, MockStorageEngine
 
 
@@ -122,6 +122,32 @@ def test_inverted_index_text_match_ranks_by_tfidf_cosine() -> None:
     assert result.records == [{"id": 1, "body": "visual search database"}]
     assert ranked[0][0] == "1"
     assert ranked[0][1] > ranked[1][1]
+
+
+def test_inverted_index_accepts_plain_string_query() -> None:
+    index = InvertedIndex(column="body", block_document_limit=2)
+    index.build(
+        [
+            {"id": 1, "body": "visual search database"},
+            {"id": 2, "body": "audio retrieval engine"},
+        ]
+    )
+
+    result = index.search("visual")
+
+    assert result.success
+    assert result.records == [{"id": 1, "body": "visual search database"}]
+
+
+def test_inverted_index_rejects_foreign_predicate() -> None:
+    index = InvertedIndex(column="body", block_document_limit=2)
+    index.build([{"id": 1, "body": "alpha beta"}])
+
+    result = index.search(EqualityPredicate(column="body", value="alpha"))
+
+    assert not result.success
+    assert result.records == []
+    assert "EqualityPredicate" in result.message
 
 
 def test_inverted_index_insert_and_delete_update_postings() -> None:

@@ -8,6 +8,7 @@ from indices.ports import (
     PredicateKind,
     RangePredicate,
     SpatialRangePredicate,
+    TextMatchPredicate,
 )
 
 from query.ports import Planner
@@ -58,6 +59,8 @@ class QueryPlanner(Planner):
                 min_corner=cond.min_corner,
                 max_corner=cond.max_corner,
             )
+        if isinstance(cond, A.MatchCondition):
+            return TextMatchPredicate(column=cond.column, terms=cond.terms, k=cond.k)
         raise ValueError(f"condición no soportada: {type(cond).__name__}")
 
     # Elige el índice adecuado para el predicado
@@ -110,7 +113,12 @@ class QueryPlanner(Planner):
             )
         if isinstance(ast, A.Select):
             predicate = self._to_predicate(ast.where)
-            k = predicate.k if isinstance(predicate, KnnPredicate) else ast.limit
+            # El k propio del predicado tiene prioridad sobre el LIMIT
+            k = ast.limit
+            if isinstance(predicate, KnnPredicate):
+                k = predicate.k
+            elif isinstance(predicate, TextMatchPredicate) and predicate.k is not None:
+                k = predicate.k
             return QueryPlan(
                 op=PlanOp.SELECT,
                 table=ast.table,
