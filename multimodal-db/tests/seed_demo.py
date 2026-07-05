@@ -267,6 +267,21 @@ def _seed_songs(client: httpx.Client) -> None:
     run_query(client, f"INSERT INTO songs (id, title, lyrics) VALUES {values}")
 
 
+# Crea la tabla que une portada y letra para la búsqueda combinada
+def _seed_albums(client: httpx.Client, names: list[str]) -> None:
+    if len(names) < 2:
+        print("albums: se omite la tabla híbrida por falta de imágenes")
+        return
+    run_query(client, "CREATE TABLE albums (id INT, cover VECTOR, lyrics TEXT)")
+    run_query(client, "CREATE INDEX ON albums (cover) USING knn")
+    run_query(client, "CREATE INDEX ON albums (lyrics) USING inverted")
+    values = ", ".join(
+        f'({i}, "{name}", "{lyrics}")'
+        for i, (name, (_id, _title, lyrics)) in enumerate(zip(names, _SONGS), start=1)
+    )
+    run_query(client, f"INSERT INTO albums (id, cover, lyrics) VALUES {values}")
+
+
 # Crea una tabla con índice knn sobre archivos ya subidos
 def _seed_knn_table(client: httpx.Client, table: str, column: str, names: list[str]) -> None:
     if len(names) < 2:
@@ -316,12 +331,17 @@ def main() -> None:
         _seed_songs(client)
         photo_names = [name for _i, name in rows] if images else []
         _seed_knn_table(client, "photos", "img", photo_names)
+        _seed_albums(client, photo_names)
         _seed_knn_table(client, "tracks", "audio", [name for _i, name in audio_rows])
 
         # Las mismas consultas que ofrecen los snippets del frontend
         _print_sample(client, 'SELECT * FROM songs WHERE MATCH(lyrics, "corazón noche", 3)')
         _print_sample(client, 'SELECT * FROM photos WHERE KNN(img, "demo_query.png", 5)')
         _print_sample(client, 'SELECT * FROM tracks WHERE KNN(audio, "demo_query.wav", 3)')
+        _print_sample(
+            client,
+            'SELECT * FROM albums WHERE HYBRID(cover, "demo_query.png", lyrics, "fuego corazón", 3)',
+        )
 
     _knn_demo(images)
     _audio_knn_demo(audios)

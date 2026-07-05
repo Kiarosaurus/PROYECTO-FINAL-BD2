@@ -24,18 +24,54 @@ function basename(path: string): string {
   return parts[parts.length - 1];
 }
 
+// Scores que trae cada fila de una consulta HYBRID
+type Scores = { fused: unknown; visual: unknown; text: unknown };
+
+type GalleryItem = { path: string; scores?: Scores };
+
+// Muestra un score con pocos decimales
+// Usa un guion cuando el valor falta
+function fmtScore(value: unknown): string {
+  return typeof value === "number" ? value.toFixed(3) : "-";
+}
+
+function ScoreCaption({ scores }: { scores: Scores }) {
+  return (
+    <span className="gallery-scores">
+      fusión {fmtScore(scores.fused)} · visual {fmtScore(scores.visual)} · texto{" "}
+      {fmtScore(scores.text)}
+    </span>
+  );
+}
+
 export default function MediaGallery({ result }: { result: QueryResult }) {
   const [view, setView] = useState<View>("grid");
   const [shown, setShown] = useState(PAGE);
   const [selected, setSelected] = useState<string | null>(null);
 
-  const items: string[] = [];
+  const fusedCol = result.columns.indexOf("fused_score");
+  const visualCol = result.columns.indexOf("visual_score");
+  const textCol = result.columns.indexOf("text_score");
+  const hasScores = fusedCol !== -1 && visualCol !== -1 && textCol !== -1;
+
+  const items: GalleryItem[] = [];
   for (const row of result.rows) {
     for (const cell of row) {
       // Una celda KNN trae una lista con el archivo y su score
       for (const value of Array.isArray(cell) ? cell : [cell]) {
         if (isImage(value)) {
-          items.push(value);
+          items.push(
+            hasScores
+              ? {
+                  path: value,
+                  scores: {
+                    fused: row[fusedCol],
+                    visual: row[visualCol],
+                    text: row[textCol],
+                  },
+                }
+              : { path: value },
+          );
         }
       }
     }
@@ -77,35 +113,41 @@ export default function MediaGallery({ result }: { result: QueryResult }) {
 
       {view === "grid" ? (
         <div className="gallery">
-          {visible.map((path, i) => (
+          {visible.map((item, i) => (
             <figure
               key={i}
               className="gallery-item"
-              onClick={() => setSelected(path)}
+              onClick={() => setSelected(item.path)}
             >
               <img
-                src={fileUrl(basename(path))}
-                alt={basename(path)}
+                src={fileUrl(basename(item.path))}
+                alt={basename(item.path)}
                 loading="lazy"
               />
-              <figcaption>{basename(path)}</figcaption>
+              <figcaption>
+                {basename(item.path)}
+                {item.scores && <ScoreCaption scores={item.scores} />}
+              </figcaption>
             </figure>
           ))}
         </div>
       ) : (
         <ul className="media-rows">
-          {visible.map((path, i) => (
+          {visible.map((item, i) => (
             <li
               key={i}
               className="media-row"
-              onClick={() => setSelected(path)}
+              onClick={() => setSelected(item.path)}
             >
               <img
-                src={fileUrl(basename(path))}
-                alt={basename(path)}
+                src={fileUrl(basename(item.path))}
+                alt={basename(item.path)}
                 loading="lazy"
               />
-              <span>{basename(path)}</span>
+              <span>
+                {basename(item.path)}
+                {item.scores && <ScoreCaption scores={item.scores} />}
+              </span>
             </li>
           ))}
         </ul>

@@ -27,6 +27,11 @@ const SNIPPETS: Snippet[] = [
     sql: 'SELECT * FROM tracks WHERE KNN(audio, "demo_query.wav", 3)',
     hint: "Requiere correr el seed (tests/seed_demo.py)",
   },
+  {
+    label: "HYBRID fusión",
+    sql: 'SELECT * FROM albums WHERE HYBRID(cover, "demo_query.png", lyrics, "fuego corazón", 3)',
+    hint: "Fusiona búsqueda visual y textual; requiere correr el seed (tests/seed_demo.py)",
+  },
 ];
 
 export default function SqlSnippets({ onPick }: { onPick: (sql: string) => void }) {

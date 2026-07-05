@@ -288,6 +288,14 @@ body {
   word-break: break-all;
 }
 
+.gallery-scores {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: #7b8494;
+  font-variant-numeric: tabular-nums;
+}
+
 .audio-list {
   display: flex;
   flex-direction: column;
