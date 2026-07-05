@@ -69,6 +69,24 @@ Next.js en `frontend/`:
 - Tabla con los resultados.
 - Galería para imágenes y reproductor para audio, servidos desde `/files/{name}`.
 
+## Experimentos
+
+`experiments/run_benchmarks.py` mide el engine propio y, si hay `POSTGRES_DSN`,
+lo compara contra GIN y pgvector IVFFlat. Deja `results.csv` y plots de latencia
+en `experiments/results/`:
+
+```bash
+cd multimodal-db
+python -m experiments.run_benchmarks --sizes 1000 10000 100000 --queries 20
+```
+
+Sin `POSTGRES_DSN` corre solo los índices propios. Con el stack de Docker arriba:
+
+```bash
+POSTGRES_DSN="dbname=multimodal user=mmdb password=mmdb host=localhost" \
+  python -m experiments.run_benchmarks --sizes 1000 10000
+```
+
 ## Cómo correr
 
 Hay dos formas: todo en Docker o cada parte en local.
