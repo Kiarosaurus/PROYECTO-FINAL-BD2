@@ -15,10 +15,6 @@ Block = list[tuple[str, Postings]]
 BLOCK_PAGE_SIZE = 4096
 
 
-def tokenize(text: str) -> list[str]:
-    return DEFAULT_PREPROCESSOR.tokenize(text)
-
-
 @dataclass
 class SPIMIBlockBuilder:
     block_document_limit: int = 128

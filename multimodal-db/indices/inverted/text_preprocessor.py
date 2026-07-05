@@ -115,7 +115,3 @@ class TextPreprocessor:
 
 
 DEFAULT_PREPROCESSOR = TextPreprocessor()
-
-
-def preprocess(text: str) -> list[str]:
-    return DEFAULT_PREPROCESSOR.tokenize(text)

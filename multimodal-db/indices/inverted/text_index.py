@@ -7,7 +7,7 @@ from typing import Any, Iterable
 from core.metrics import IOStats, OperationResult
 from core.ports.buffer import BufferManager
 from core.ports.index import Index
-from indices.inverted.spimi_builder import SPIMIBlockBuilder, tokenize
+from indices.inverted.spimi_builder import SPIMIBlockBuilder
 from indices.inverted.text_preprocessor import DEFAULT_PREPROCESSOR, TextPreprocessor
 from indices.ports import TextMatchPredicate
 
