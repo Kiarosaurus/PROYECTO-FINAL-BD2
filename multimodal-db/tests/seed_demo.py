@@ -109,6 +109,31 @@ def _seed_from_folder(client: httpx.Client, paths: list[str]) -> list[tuple]:
     return rows
 
 
+# Construye el índice KNN de imágenes y muestra una búsqueda de ejemplo
+def _knn_demo(paths: list[str]) -> None:
+    if len(paths) < 2:
+        return
+    from multimedia.codebook.kmeans_codebook import KMeansCodebook
+    from multimedia.extractors.sift_extractor import SIFTExtractor
+    from multimedia.knn_index import MultimediaKNNIndex
+    from multimedia.pipeline import MultimediaPipeline
+
+    pipeline = MultimediaPipeline(SIFTExtractor(), KMeansCodebook(k=32), MultimediaKNNIndex())
+    try:
+        result = pipeline.build_from_files(paths)
+    except ValueError as error:
+        print("knn: no se pudo entrenar el codebook:", error)
+        return
+    if not result.success:
+        print("knn:", result.message)
+        return
+    query = paths[0]
+    top = pipeline.search_file(query, k=3)
+    print("knn query:", os.path.basename(query))
+    for key, score in top.records:
+        print(f"knn hit: {key} score={score:.3f}")
+
+
 # Sube datos sintéticos y devuelve las filas a insertar
 def _seed_synthetic(client: httpx.Client) -> list[tuple]:
     upload(client, "demo.png", _PNG_1X1, "image/png")
@@ -134,6 +159,8 @@ def main() -> None:
         print("columns:", result["columns"])
         for row in result["rows"]:
             print("row:", row)
+
+    _knn_demo(images)
 
 
 if __name__ == "__main__":
