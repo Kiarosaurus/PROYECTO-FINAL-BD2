@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from experiments.run_benchmarks import make_documents, make_vectors, run_benchmarks
+from experiments.run_benchmarks import (
+    exact_knn_ground_truth,
+    jaccard_overlap,
+    make_documents,
+    make_vectors,
+    recall_at_k,
+    run_benchmarks,
+)
 
 import numpy as np
 
@@ -21,7 +28,26 @@ def test_benchmark_generates_csv_and_rows_without_postgres(tmp_path: Path) -> No
     assert engines == {"own-inverted", "own-knn"}
     assert all(row["size"] == 30 for row in rows)
     assert all(row["avg_query_ms"] >= 0 for row in rows)
+    assert all(row["throughput_qps"] > 0 for row in rows)
+    knn_row = next(row for row in rows if row["engine"] == "own-knn")
+    assert 0.0 <= knn_row["recall_at_k"] <= 1.0
+    assert all(row["rss_mb"] >= 0 for row in rows)
     assert (tmp_path / "results.csv").exists()
+
+
+def test_recall_at_k_with_exact_ground_truth_minimal() -> None:
+    vectors = np.eye(3, dtype=np.float32)
+    truth = exact_knn_ground_truth(vectors, vectors, k=1)
+
+    assert truth == [{"0"}, {"1"}, {"2"}]
+    assert recall_at_k(truth, truth) == 1.0
+    assert recall_at_k([{"0"}, {"1"}, {"9"}], truth) == round(2 / 3, 3)
+
+
+def test_jaccard_overlap_minimal() -> None:
+    assert jaccard_overlap([{"a", "b"}], [{"a", "b"}]) == 1.0
+    assert jaccard_overlap([{"a", "b"}], [{"a", "c"}]) == round(1 / 3, 3)
+    assert jaccard_overlap([], []) == 0.0
 
 
 def test_benchmark_own_text_reports_real_disk_io(tmp_path: Path) -> None:

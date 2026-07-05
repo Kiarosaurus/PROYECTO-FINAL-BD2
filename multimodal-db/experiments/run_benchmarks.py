@@ -15,9 +15,32 @@ from indices.inverted.text_index import InvertedIndex
 from indices.ports import TextMatchPredicate
 from multimedia.knn_index import MultimediaKNNIndex
 
+# El módulo resource no existe en Windows
+try:
+    import resource
+except ImportError:
+    resource = None
+
 VECTOR_DIM = 256
 VOCABULARY_SIZE = 500
 WORDS_PER_DOCUMENT = 20
+TOP_K = 10
+
+# Orden fijo de columnas del CSV de resultados
+CSV_COLUMNS = [
+    "modality",
+    "engine",
+    "size",
+    "build_s",
+    "avg_query_ms",
+    "disk_reads",
+    "disk_writes",
+    "throughput_qps",
+    "recall_at_k",
+    "overlap_at_k",
+    "rss_mb",
+    "pg_index_mb",
+]
 
 # Ruta por defecto del CSV de letras descargado de Drive
 LYRICS_CSV = Path(__file__).resolve().parents[2] / "data" / "raw" / "lyrics" / "lyrics_dataset.csv"
@@ -79,7 +102,94 @@ def _average_ms(samples: list[float]) -> float:
     return round(sum(samples) / max(len(samples), 1), 3)
 
 
-def bench_own_text(documents: list[str], queries: list[str], workdir: Path) -> dict:
+# Consultas por segundo sobre el tiempo total del lote
+def _throughput_qps(query_count: int, wall_s: float) -> float:
+    if wall_s <= 0:
+        return 0.0
+    return round(query_count / wall_s, 2)
+
+
+# Pico de memoria del proceso en MB
+def process_peak_rss_mb() -> float:
+    if resource is None:
+        return 0.0
+    return round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
+
+
+# Calcula el top k real comparando cada consulta contra toda la colección
+def exact_knn_ground_truth(vectors: np.ndarray, queries: np.ndarray, k: int = TOP_K) -> list[set[str]]:
+    norms = np.linalg.norm(vectors, axis=1)
+    norms[norms == 0] = 1.0
+    truth: list[set[str]] = []
+    for query in queries:
+        query_norm = np.linalg.norm(query)
+        if query_norm == 0:
+            query_norm = 1.0
+        similarities = (vectors @ query) / (norms * query_norm)
+        top = np.argsort(similarities)[::-1][:k]
+        truth.append({str(int(position)) for position in top})
+    return truth
+
+
+# Fracción promedio del top k real que cada motor logra devolver
+def recall_at_k(retrieved: list[set[str]], truth: list[set[str]]) -> float:
+    if not truth:
+        return 0.0
+    total = 0.0
+    for found, expected in zip(retrieved, truth):
+        total += len(found & expected) / max(len(expected), 1)
+    return round(total / len(truth), 3)
+
+
+# Parecido Jaccard promedio entre los top k de dos motores
+def jaccard_overlap(first: list[set[str]], second: list[set[str]]) -> float:
+    if not first:
+        return 0.0
+    total = 0.0
+    for left, right in zip(first, second):
+        union = left | right
+        total += len(left & right) / len(union) if union else 1.0
+    return round(total / len(first), 3)
+
+
+# Tamaño en MB de un índice nativo de PostgreSQL
+def _pg_index_size_mb(dsn: str, index_name: str) -> float:
+    import psycopg2
+
+    with psycopg2.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT COALESCE(pg_relation_size(to_regclass(%s)), 0)", (index_name,))
+        size_bytes = cur.fetchone()[0]
+    return round(size_bytes / (1024 * 1024), 2)
+
+
+# Con dos índices vectoriales presentes el planner puede elegir el otro
+# Se borra el índice que no se va a medir para que la medición sea real
+def _ensure_single_vector_index(dsn: str, kind: str) -> None:
+    import psycopg2
+
+    with psycopg2.connect(dsn) as conn, conn.cursor() as cur:
+        if kind == "IVFFlat":
+            cur.execute("DROP INDEX IF EXISTS compare.idx_media_hnsw")
+        else:
+            cur.execute("DROP INDEX IF EXISTS compare.idx_media_ivfflat")
+        conn.commit()
+
+
+# Vuelve a dejar solo el índice IVFFlat que define init.sql
+def _restore_default_vector_index(dsn: str) -> None:
+    import psycopg2
+
+    with psycopg2.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute("DROP INDEX IF EXISTS compare.idx_media_hnsw")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_media_ivfflat "
+            "ON compare.media USING ivfflat (feature_vec vector_cosine_ops) "
+            "WITH (lists = 100)"
+        )
+        conn.commit()
+
+
+def bench_own_text(documents: list[str], queries: list[str], workdir: Path) -> tuple[dict, list[set[str]]]:
     storage = FileStorageEngine(workdir)
     buffer = LRUBufferManager(storage, capacity=256)
     index = InvertedIndex(column="body", buffer=buffer, file_id="bench_text")
@@ -88,12 +198,16 @@ def bench_own_text(documents: list[str], queries: list[str], workdir: Path) -> d
     index.build(records)
     build_s = round(time.perf_counter() - start, 3)
     latencies = []
+    retrieved: list[set[str]] = []
+    batch_start = time.perf_counter()
     for terms in queries:
         t0 = time.perf_counter()
-        index.search(TextMatchPredicate(column="body", terms=terms, k=10))
+        result = index.search(TextMatchPredicate(column="body", terms=terms, k=TOP_K))
         latencies.append((time.perf_counter() - t0) * 1000)
+        retrieved.append({str(record["id"]) for record in result.records})
+    wall_s = time.perf_counter() - batch_start
     stats = storage.stats()
-    return {
+    row = {
         "modality": "text",
         "engine": "own-inverted",
         "size": len(documents),
@@ -101,20 +215,27 @@ def bench_own_text(documents: list[str], queries: list[str], workdir: Path) -> d
         "avg_query_ms": _average_ms(latencies),
         "disk_reads": stats.disk_reads,
         "disk_writes": stats.disk_writes,
+        "throughput_qps": _throughput_qps(len(queries), wall_s),
+        "rss_mb": process_peak_rss_mb(),
     }
+    return row, retrieved
 
 
-def bench_own_knn(vectors: np.ndarray, queries: np.ndarray) -> dict:
+def bench_own_knn(vectors: np.ndarray, queries: np.ndarray) -> tuple[dict, list[set[str]]]:
     index = MultimediaKNNIndex()
     start = time.perf_counter()
     index.build([(str(i), vector) for i, vector in enumerate(vectors)])
     build_s = round(time.perf_counter() - start, 3)
     latencies = []
+    retrieved: list[set[str]] = []
+    batch_start = time.perf_counter()
     for query in queries:
         t0 = time.perf_counter()
-        index.search(query, k=10)
+        result = index.search(query, k=TOP_K)
         latencies.append((time.perf_counter() - t0) * 1000)
-    return {
+        retrieved.append({str(key) for key, _score in result.records})
+    wall_s = time.perf_counter() - batch_start
+    row = {
         "modality": "vector",
         "engine": "own-knn",
         "size": len(vectors),
@@ -122,10 +243,13 @@ def bench_own_knn(vectors: np.ndarray, queries: np.ndarray) -> dict:
         "avg_query_ms": _average_ms(latencies),
         "disk_reads": 0,
         "disk_writes": 0,
+        "throughput_qps": _throughput_qps(len(queries), wall_s),
+        "rss_mb": process_peak_rss_mb(),
     }
+    return row, retrieved
 
 
-def bench_pg_text(documents: list[str], queries: list[str], dsn: str) -> dict:
+def bench_pg_text(documents: list[str], queries: list[str], dsn: str) -> tuple[dict, list[set[str]]]:
     from comparison.postgres_gin import PostgresGINEngine
 
     engine = PostgresGINEngine(dsn)
@@ -133,8 +257,15 @@ def bench_pg_text(documents: list[str], queries: list[str], dsn: str) -> dict:
     engine.load([{"lyrics": body} for body in documents])
     engine.build_native_index("GIN")
     build_s = round(time.perf_counter() - start, 3)
-    latencies = [engine.query(terms).latency_ms for terms in queries]
-    return {
+    latencies = []
+    retrieved: list[set[str]] = []
+    batch_start = time.perf_counter()
+    for terms in queries:
+        result = engine.query(terms)
+        latencies.append(result.latency_ms)
+        retrieved.append({str(item[0]) for item in result.records})
+    wall_s = time.perf_counter() - batch_start
+    row = {
         "modality": "text",
         "engine": "pg-gin",
         "size": len(documents),
@@ -142,27 +273,51 @@ def bench_pg_text(documents: list[str], queries: list[str], dsn: str) -> dict:
         "avg_query_ms": _average_ms(latencies),
         "disk_reads": 0,
         "disk_writes": 0,
+        "throughput_qps": _throughput_qps(len(queries), wall_s),
+        "pg_index_mb": _pg_index_size_mb(dsn, "compare.idx_documents_fts"),
     }
+    return row, retrieved
 
 
-def bench_pg_knn(vectors: np.ndarray, queries: np.ndarray, dsn: str) -> dict:
+def bench_pg_knn(
+    vectors: np.ndarray,
+    queries: np.ndarray,
+    dsn: str,
+    kind: str = "IVFFlat",
+) -> tuple[dict, list[set[str]]]:
     from comparison.pgvector_ivf import PgVectorIVFEngine
 
     engine = PgVectorIVFEngine(dsn, modality="IMAGE")
     start = time.perf_counter()
     engine.load([{"path": f"v{i}", "vector": vector} for i, vector in enumerate(vectors)])
-    engine.build_native_index("IVFFlat")
+    engine.build_native_index(kind)
     build_s = round(time.perf_counter() - start, 3)
-    latencies = [engine.query(query).latency_ms for query in queries]
-    return {
+    latencies = []
+    retrieved: list[set[str]] = []
+    batch_start = time.perf_counter()
+    for query in queries:
+        result = engine.query(query)
+        latencies.append(result.latency_ms)
+        retrieved.append({str(item[0]) for item in result.records})
+    wall_s = time.perf_counter() - batch_start
+    if kind == "IVFFlat":
+        engine_name = "pg-ivfflat"
+        index_name = "compare.idx_media_ivfflat"
+    else:
+        engine_name = "pg-hnsw"
+        index_name = "compare.idx_media_hnsw"
+    row = {
         "modality": "vector",
-        "engine": "pg-ivfflat",
+        "engine": engine_name,
         "size": len(vectors),
         "build_s": build_s,
         "avg_query_ms": _average_ms(latencies),
         "disk_reads": 0,
         "disk_writes": 0,
+        "throughput_qps": _throughput_qps(len(queries), wall_s),
+        "pg_index_mb": _pg_index_size_mb(dsn, index_name),
     }
+    return row, retrieved
 
 
 # Corre todas las mediciones y deja CSV y plots en out_dir
@@ -195,12 +350,23 @@ def run_benchmarks(
             ]
         vectors = make_vectors(size, rng)
         vector_queries = vectors[: min(query_count, len(vectors))]
+        truth = exact_knn_ground_truth(vectors, vector_queries, TOP_K)
         with tempfile.TemporaryDirectory() as workdir:
-            rows.append(bench_own_text(documents, text_queries, Path(workdir)))
-        rows.append(bench_own_knn(vectors, vector_queries))
+            text_row, own_text_top = bench_own_text(documents, text_queries, Path(workdir))
+        rows.append(text_row)
+        knn_row, own_knn_top = bench_own_knn(vectors, vector_queries)
+        knn_row["recall_at_k"] = recall_at_k(own_knn_top, truth)
+        rows.append(knn_row)
         if dsn:
-            rows.append(bench_pg_text(documents, text_queries, dsn))
-            rows.append(bench_pg_knn(vectors, vector_queries, dsn))
+            gin_row, gin_top = bench_pg_text(documents, text_queries, dsn)
+            text_row["overlap_at_k"] = jaccard_overlap(own_text_top, gin_top)
+            rows.append(gin_row)
+            for kind in ("IVFFlat", "HNSW"):
+                _ensure_single_vector_index(dsn, kind)
+                pg_row, pg_top = bench_pg_knn(vectors, vector_queries, dsn, kind)
+                pg_row["recall_at_k"] = recall_at_k(pg_top, truth)
+                rows.append(pg_row)
+            _restore_default_vector_index(dsn)
     _write_csv(rows, out_path / "results.csv")
     if make_plots:
         _write_plots(rows, out_path)
@@ -211,12 +377,12 @@ def _write_csv(rows: list[dict], csv_path: Path) -> None:
     if not rows:
         return
     with open(csv_path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+        writer = csv.DictWriter(fh, fieldnames=CSV_COLUMNS, restval="")
         writer.writeheader()
         writer.writerows(rows)
 
 
-# Un plot comparativo de latencia por modalidad
+# Un plot comparativo de latencia por modalidad y otro de recall
 def _write_plots(rows: list[dict], out_path: Path) -> None:
     try:
         import matplotlib
@@ -250,6 +416,42 @@ def _write_plots(rows: list[dict], out_path: Path) -> None:
         figure.tight_layout()
         figure.savefig(out_path / f"latency_{modality}.png", dpi=120)
         plt.close(figure)
+    subset = [
+        row
+        for row in rows
+        if row["modality"] == "vector" and row.get("recall_at_k", "") != ""
+    ]
+    if not subset:
+        return
+    engines = sorted({row["engine"] for row in subset})
+    figure, axis = plt.subplots(figsize=(7, 4))
+    for engine in engines:
+        points = sorted(
+            (row["size"], row["recall_at_k"])
+            for row in subset
+            if row["engine"] == engine
+        )
+        axis.plot(
+            [size for size, _recall in points],
+            [recall for _size, recall in points],
+            marker="o",
+            label=engine,
+        )
+    axis.set_xlabel("cantidad de registros")
+    axis.set_ylabel(f"recall@{TOP_K}")
+    axis.set_ylim(0.0, 1.05)
+    axis.set_title("Recall contra el scan lineal exacto")
+    axis.legend()
+    figure.tight_layout()
+    figure.savefig(out_path / "recall_vector.png", dpi=120)
+    plt.close(figure)
+
+
+# Formatea una celda que puede venir vacía
+def _fmt_metric(value: object) -> str:
+    if value in ("", None):
+        return "     -"
+    return f"{float(value):6.3f}"
 
 
 def main() -> None:
@@ -277,7 +479,12 @@ def main() -> None:
     for row in rows:
         print(
             f"{row['modality']:6} | {row['engine']:12} | n={row['size']:7} | "
-            f"build={row['build_s']:8.3f}s | query={row['avg_query_ms']:8.3f}ms"
+            f"build={row['build_s']:8.3f}s | query={row['avg_query_ms']:8.3f}ms | "
+            f"qps={row['throughput_qps']:9.2f} | "
+            f"recall={_fmt_metric(row.get('recall_at_k'))} | "
+            f"overlap={_fmt_metric(row.get('overlap_at_k'))} | "
+            f"rss={_fmt_metric(row.get('rss_mb'))}MB | "
+            f"pg_idx={_fmt_metric(row.get('pg_index_mb'))}MB"
         )
     if not dsn:
         print("POSTGRES_DSN no definido, se midieron solo los índices propios")
