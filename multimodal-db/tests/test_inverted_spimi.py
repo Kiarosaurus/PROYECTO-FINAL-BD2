@@ -4,6 +4,7 @@ from indices.inverted.spimi_builder import SPIMIBlockBuilder
 from indices.inverted.text_index import InvertedIndex
 from indices.inverted.text_preprocessor import TextPreprocessor
 from indices.ports import EqualityPredicate, TextMatchPredicate
+from query.index_factory import EngineIndexFactory, IndexType
 from tests.mocks import MockBufferManager, MockStorageEngine
 
 
@@ -288,3 +289,113 @@ def test_inverted_index_streams_postings_across_storage_pages() -> None:
     assert index.posting_page_count() > 1
     assert restored.posting_page_count() == index.posting_page_count()
     assert result.records == [records[9]]
+
+
+def test_inverted_index_vocabulary_limit_keeps_top_terms_by_collection_frequency() -> None:
+    index = InvertedIndex(column="body", block_document_limit=2, vocabulary_limit=2)
+
+    index.build(
+        [
+            {"id": 1, "body": "alpha alpha beta"},
+            {"id": 2, "body": "alpha beta"},
+            {"id": 3, "body": "gamma delta gamma"},
+        ]
+    )
+
+    assert index.postings_for("alpha") == {"1": 2, "2": 1}
+    assert index.postings_for("beta") == {"1": 1, "2": 1}
+    assert index.postings_for("gamma") == {}
+    assert index.postings_for("delta") == {}
+    assert index.document_norm(3) == 0.0
+
+
+def test_inverted_index_vocabulary_limit_breaks_frequency_ties_alphabetically() -> None:
+    index = InvertedIndex(column="body", block_document_limit=2, vocabulary_limit=2)
+
+    index.build(
+        [
+            {"id": 1, "body": "zeta alpha momo"},
+            {"id": 2, "body": "momo zeta alpha"},
+        ]
+    )
+
+    assert index.postings_for("alpha") == {"1": 1, "2": 1}
+    assert index.postings_for("momo") == {"1": 1, "2": 1}
+    assert index.postings_for("zeta") == {}
+
+
+def test_inverted_index_vocabulary_limit_search_on_pruned_term_returns_empty() -> None:
+    index = InvertedIndex(column="body", block_document_limit=2, vocabulary_limit=2)
+    index.build(
+        [
+            {"id": 1, "body": "alpha alpha beta"},
+            {"id": 2, "body": "alpha beta"},
+            {"id": 3, "body": "gamma delta gamma"},
+        ]
+    )
+
+    result = index.search(TextMatchPredicate(column="body", terms="gamma"))
+
+    assert result.success
+    assert result.records == []
+
+
+def test_inverted_index_vocabulary_limit_freezes_dictionary_on_insert() -> None:
+    index = InvertedIndex(column="body", block_document_limit=2, vocabulary_limit=2)
+    index.build(
+        [
+            {"id": 1, "body": "alpha alpha beta"},
+            {"id": 2, "body": "alpha beta"},
+        ]
+    )
+
+    index.insert(3, {"id": 3, "body": "alpha delta delta"})
+    known = index.search(TextMatchPredicate(column="body", terms="alpha"))
+    pruned = index.search(TextMatchPredicate(column="body", terms="delta"))
+
+    assert index.postings_for("alpha") == {"1": 2, "2": 1, "3": 1}
+    assert index.postings_for("delta") == {}
+    assert {record["id"] for record in known.records} == {1, 2, 3}
+    assert pruned.records == []
+
+
+def test_inverted_index_vocabulary_limit_survives_snapshot_restore() -> None:
+    storage = MockStorageEngine()
+    buffer = MockBufferManager(storage)
+    index = InvertedIndex(
+        column="body",
+        block_document_limit=2,
+        buffer=buffer,
+        vocabulary_limit=2,
+    )
+    index.build(
+        [
+            {"id": 1, "body": "alpha alpha beta"},
+            {"id": 2, "body": "alpha beta"},
+            {"id": 3, "body": "gamma delta gamma"},
+        ]
+    )
+
+    restored = InvertedIndex(
+        column="body",
+        block_document_limit=2,
+        buffer=buffer,
+        vocabulary_limit=2,
+    )
+    restored.insert(4, {"id": 4, "body": "delta alpha"})
+
+    assert restored.postings_for("delta") == {}
+    assert restored.postings_for("alpha") == {"1": 2, "2": 1, "4": 1}
+
+
+def test_engine_index_factory_passes_vocabulary_limit_to_inverted_index() -> None:
+    factory = EngineIndexFactory()
+
+    index = factory.create(
+        IndexType.INVERTED,
+        {"table": "docs", "column": "body", "vocabulary_limit": 2},
+        MockStorageEngine(),
+    )
+
+    assert isinstance(index, InvertedIndex)
+    assert index.vocabulary_limit == 2

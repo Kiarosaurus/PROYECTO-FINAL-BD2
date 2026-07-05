@@ -25,19 +25,24 @@ class InvertedIndex(Index):
         file_id: str | None = None,
         preprocessor: TextPreprocessor = DEFAULT_PREPROCESSOR,
         chunker: TextChunker = DEFAULT_CHUNKER,
+        vocabulary_limit: int | None = None,
     ) -> None:
         if block_document_limit < 1:
             raise ValueError("SPIMI block document limit must be positive")
+        if vocabulary_limit is not None and vocabulary_limit < 1:
+            raise ValueError("vocabulary limit must be positive")
         self.column = column
         self.block_document_limit = block_document_limit
         self.buffer = buffer
         self.file_id = file_id or f"inverted_{column}"
         self.preprocessor = preprocessor
         self.chunker = chunker
+        self.vocabulary_limit = vocabulary_limit
         self._documents: dict[str, Any] = {}
         self._chunk_parent: dict[str, str] = {}
         self._postings: dict[str, dict[str, int]] = {}
         self._doc_norms: dict[str, float] = {}
+        self._vocabulary: frozenset[str] | None = None
         self._last_block_count = 0
         self._posting_page_count = 0
         self._load_snapshot()
@@ -60,6 +65,7 @@ class InvertedIndex(Index):
         )
         self._postings = builder.build(documents)
         self._last_block_count = builder.block_count()
+        self._apply_vocabulary_limit()
         self._compute_document_norms()
         self._persist_snapshot()
         return OperationResult(affected=len(self._documents), io=self._stats())
@@ -73,6 +79,9 @@ class InvertedIndex(Index):
             for term in self.preprocessor.tokenize(chunk_text):
                 term_counts[term] = term_counts.get(term, 0) + 1
             for term, frequency in term_counts.items():
+                # Con diccionario congelado las palabras nuevas se ignoran
+                if self._vocabulary is not None and term not in self._vocabulary:
+                    continue
                 postings = self._postings.setdefault(term, {})
                 postings[chunk_id] = postings.get(chunk_id, 0) + frequency
         self._compute_document_norms()
@@ -182,6 +191,19 @@ class InvertedIndex(Index):
     def document_norm(self, doc_id: Any) -> float:
         return self._doc_norms.get(str(doc_id), 0.0)
 
+    # Conserva solo las palabras más frecuentes de toda la colección
+    # Los empates de frecuencia se resuelven por orden alfabético
+    def _apply_vocabulary_limit(self) -> None:
+        if self.vocabulary_limit is None:
+            self._vocabulary = None
+            return
+        ranked = sorted(
+            self._postings.items(),
+            key=lambda item: (-sum(item[1].values()), item[0]),
+        )
+        self._postings = dict(ranked[: self.vocabulary_limit])
+        self._vocabulary = frozenset(self._postings)
+
     def _compute_document_norms(self) -> None:
         norm_squares: dict[str, float] = {chunk_id: 0.0 for chunk_id in self._chunk_parent}
         for term, postings in self._postings.items():
@@ -226,13 +248,14 @@ class InvertedIndex(Index):
             return
         posting_pages = self._encode_posting_pages()
         metadata = {
-            "version": 3,
+            "version": 4,
             "column": self.column,
             "documents": self._documents,
             "chunk_parents": self._chunk_parent,
             "doc_norms": self._doc_norms,
             "last_block_count": self._last_block_count,
             "posting_page_count": len(posting_pages),
+            "vocabulary": sorted(self._vocabulary) if self._vocabulary is not None else None,
         }
         try:
             encoded = json.dumps(metadata, separators=(",", ":")).encode("utf-8")
@@ -290,6 +313,9 @@ class InvertedIndex(Index):
             doc_id: doc_id for doc_id in self._documents
         }
         self._doc_norms = payload.get("doc_norms", {})
+        vocabulary = payload.get("vocabulary")
+        if vocabulary:
+            self._vocabulary = frozenset(vocabulary)
         self._last_block_count = payload.get("last_block_count", 0)
         self._posting_page_count = payload.get("posting_page_count", 0)
         if "postings" in payload:

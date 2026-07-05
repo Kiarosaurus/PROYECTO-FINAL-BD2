@@ -75,7 +75,14 @@ class EngineIndexFactory(IndexFactory):
             return ExtendibleHashIndex(column=column, buffer=buffer, file_id=file_id)
         if index_type is IndexType.RTREE:
             return RTreeIndex(column=column, buffer=buffer, file_id=file_id)
-        return InvertedIndex(column=column, buffer=buffer, file_id=file_id)
+        # El límite de vocabulario llega como dato opcional del schema
+        vocabulary_limit = schema.get("vocabulary_limit") if isinstance(schema, dict) else None
+        return InvertedIndex(
+            column=column,
+            buffer=buffer,
+            file_id=file_id,
+            vocabulary_limit=vocabulary_limit,
+        )
 
     def _buffer_for(self, storage: StorageEngine) -> Any:
         from core.buffer.lru_buffer import LRUBufferManager
