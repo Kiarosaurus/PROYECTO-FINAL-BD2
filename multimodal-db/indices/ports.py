@@ -12,6 +12,7 @@ class PredicateKind(Enum):
     KNN = auto()
     SPATIAL_RANGE = auto()
     TEXT_MATCH = auto()
+    HYBRID = auto()
 
 
 # Datos básicos de cualquier búsqueda
@@ -59,6 +60,17 @@ class TextMatchPredicate(Predicate):
     terms: str
     k: int | None = None
     kind: PredicateKind = PredicateKind.TEXT_MATCH
+
+
+# Combina una búsqueda por parecido de archivo con una de texto
+# Ningún índice lo recibe directo
+# El executor lo separa en sus dos partes
+@dataclass(frozen=True)
+class HybridPredicate(Predicate):
+    media: KnnPredicate
+    text: TextMatchPredicate
+    k: int
+    kind: PredicateKind = PredicateKind.HYBRID
 
 
 # Todas las búsquedas que acepta Index.search

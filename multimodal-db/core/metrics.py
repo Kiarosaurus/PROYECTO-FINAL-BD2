@@ -35,6 +35,8 @@ class OperationResult:
     success: bool = True
     # Tuplas devueltas por una operación de búsqueda o lectura
     records: list[Any] = field(default_factory=list)
+    # Score de cada tupla devuelta cuando la búsqueda ordena por parecido
+    scores: list[float] | None = None
     # Cantidad de tuplas afectadas por insert o delete
     affected: int = 0
     # Costo de I/O atribuible a esta operación

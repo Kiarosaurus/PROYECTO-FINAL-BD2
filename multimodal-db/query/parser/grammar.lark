@@ -32,6 +32,7 @@ where_clause: "WHERE"i condition
           | knn_predicate
           | spatial_predicate
           | match_predicate
+          | hybrid_predicate
 comparison: NAME COMP_OP value
 between: NAME "BETWEEN"i value "AND"i value
 
@@ -45,6 +46,9 @@ spatial_predicate: "WITHIN"i "(" NAME "," vector "," vector ")"
 
 // Busca textos parecidos con cantidad opcional de resultados
 match_predicate: "MATCH"i "(" NAME "," ESCAPED_STRING ("," INT)? ")"
+
+// Combina la búsqueda por archivo parecido con la búsqueda de texto
+hybrid_predicate: "HYBRID"i "(" NAME "," ESCAPED_STRING "," NAME "," ESCAPED_STRING "," INT ")"
 
 vector: "[" value ("," value)* "]"
 

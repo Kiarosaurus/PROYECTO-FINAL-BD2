@@ -140,3 +140,20 @@ def test_string_value_unquoted(parser):
 def test_float_value(parser):
     stmt = parser.parse("SELECT * FROM img WHERE score >= 0.5")
     assert stmt.where.value == 0.5
+
+
+def test_hybrid(parser):
+    stmt = parser.parse('SELECT * FROM tracks WHERE HYBRID(feat, "q.wav", lyrics, "love night", 5)')
+    assert isinstance(stmt.where, A.HybridCondition)
+    assert stmt.where.column == "feat"
+    assert stmt.where.media_file == "q.wav"
+    assert stmt.where.text_column == "lyrics"
+    assert stmt.where.terms == "love night"
+    assert stmt.where.k == 5
+
+
+@pytest.mark.parametrize("kw", ["hybrid", "Hybrid", "HYBRID"])
+def test_hybrid_case_insensitive(parser, kw):
+    stmt = parser.parse(f'SELECT * FROM tracks WHERE {kw}(feat, "q.png", body, "text", 2)')
+    assert isinstance(stmt.where, A.HybridCondition)
+    assert stmt.where.k == 2

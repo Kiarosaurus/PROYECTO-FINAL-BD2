@@ -52,6 +52,15 @@ class MatchCondition(Condition):
     k: int | None = None
 
 
+# Combina la búsqueda por archivo parecido con la búsqueda de texto
+@dataclass
+class HybridCondition(Condition):
+    media_file: str
+    text_column: str
+    terms: str
+    k: int
+
+
 # Base de todas las sentencias
 @dataclass
 class Statement:

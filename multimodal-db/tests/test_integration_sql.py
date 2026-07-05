@@ -221,3 +221,103 @@ def test_sql_delete_removes_from_real_index(run) -> None:
 
     assert deleted.rows == [(1,)]
     assert remaining.rows == [(2,)]
+
+
+@pytest.fixture
+def hybrid_run(tmp_path: Path):
+    from tests.mocks import MockMediaResolver
+
+    # Parecido visual decreciente hacia la consulta [1, 0, 0, 0]
+    resolver = MockMediaResolver(
+        table={
+            "q.png": [1.0, 0.0, 0.0, 0.0],
+            "a.png": [1.0, 0.0, 0.0, 0.0],
+            "b.png": [1.0, 0.5, 0.0, 0.0],
+            "c.png": [1.0, 1.0, 0.0, 0.0],
+            "d.png": [1.0, 2.0, 0.0, 0.0],
+        }
+    )
+    executor = QueryExecutor(
+        EngineIndexFactory(media_resolver=resolver),
+        FileStorageEngine(tmp_path / "storage"),
+    )
+    parser, planner = SqlParser(), QueryPlanner()
+
+    def _run(sql: str):
+        return executor.execute(planner.plan(parser.parse(sql)))
+
+    _run("CREATE TABLE tracks (id INT, feat VECTOR, lyrics TEXT)")
+    _run("CREATE INDEX ON tracks (feat) USING knn")
+    _run("CREATE INDEX ON tracks (lyrics) USING inverted")
+    _run(
+        'INSERT INTO tracks (id, feat, lyrics) VALUES '
+        '(1, "a.png", "calm morning fog"), '
+        '(2, "b.png", "love night moon"), '
+        '(3, "c.png", "love moon river"), '
+        '(4, "d.png", "love night love night love")'
+    )
+    return _run
+
+
+def test_sql_hybrid_fusion_winner_leads_neither_branch(hybrid_run) -> None:
+    visual = hybrid_run('SELECT * FROM tracks WHERE KNN(feat, "q.png", 4)')
+    textual = hybrid_run('SELECT id FROM tracks WHERE MATCH(lyrics, "love night", 4)')
+    fused = hybrid_run(
+        'SELECT * FROM tracks WHERE HYBRID(feat, "q.png", lyrics, "love night", 3)'
+    )
+
+    # En cada rama individual gana un documento distinto de b
+    visual_hits = [record for (record,) in visual.rows]
+    assert visual_hits[0][0] == "a.png"
+    assert textual.rows[0] == (4,)
+    # La fusión corona al documento que era segundo en ambas ramas
+    assert fused.columns == ["id", "feat", "lyrics", "fused_score", "visual_score", "text_score"]
+    feats = [row[1] for row in fused.rows]
+    assert feats == ["b.png", "d.png", "c.png"]
+    assert fused.rows[0][:3] == (2, "b.png", "love night moon")
+    assert fused.index_type == "hybrid"
+    assert fused.predicate_kind == "hybrid"
+
+
+def test_sql_hybrid_exposes_branch_scores(hybrid_run) -> None:
+    result = hybrid_run(
+        'SELECT * FROM tracks WHERE HYBRID(feat, "q.png", lyrics, "love night", 3)'
+    )
+
+    winner = result.rows[0]
+    fused_score, visual_score, text_score = winner[3], winner[4], winner[5]
+    assert fused_score > 0.0
+    # El ganador aparece en ambas ramas con sus scores de origen
+    assert visual_score is not None and 0.0 < visual_score <= 1.0
+    assert text_score is not None and 0.0 < text_score <= 1.0
+    scores = [row[3] for row in result.rows]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_sql_hybrid_explain_shows_both_branches(hybrid_run) -> None:
+    result = hybrid_run(
+        'SELECT * FROM tracks WHERE HYBRID(feat, "q.png", lyrics, "love night", 3)'
+    )
+
+    texts = [text for _depth, text in result.explain]
+    assert any("Hybrid Fusion Scan using hybrid" in text for text in texts)
+    branches = [text for text in texts if text.startswith("Branch:")]
+    assert len(branches) == 2
+    assert "KNN Index Scan on feat" in branches[0]
+    assert "Text Search Scan on lyrics" in branches[1]
+
+
+def test_sql_hybrid_missing_text_index_raises(run) -> None:
+    run("CREATE TABLE tracks (id INT, feat VECTOR, lyrics TEXT)")
+    run("CREATE INDEX ON tracks (feat) USING knn")
+
+    with pytest.raises(ValueError, match="tracks.lyrics"):
+        run('SELECT * FROM tracks WHERE HYBRID(feat, "q.png", lyrics, "love", 3)')
+
+
+def test_sql_hybrid_missing_media_index_raises(run) -> None:
+    run("CREATE TABLE tracks (id INT, feat VECTOR, lyrics TEXT)")
+    run("CREATE INDEX ON tracks (lyrics) USING inverted")
+
+    with pytest.raises(ValueError, match="tracks.feat"):
+        run('SELECT * FROM tracks WHERE HYBRID(feat, "q.png", lyrics, "love", 3)')

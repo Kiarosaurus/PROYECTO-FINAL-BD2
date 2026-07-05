@@ -4,6 +4,7 @@ from typing import Any
 
 from indices.ports import (
     EqualityPredicate,
+    HybridPredicate,
     KnnPredicate,
     PredicateKind,
     RangePredicate,
@@ -61,12 +62,22 @@ class QueryPlanner(Planner):
             )
         if isinstance(cond, A.MatchCondition):
             return TextMatchPredicate(column=cond.column, terms=cond.terms, k=cond.k)
+        if isinstance(cond, A.HybridCondition):
+            return HybridPredicate(
+                column=cond.column,
+                media=KnnPredicate(column=cond.column, query=cond.media_file, k=cond.k),
+                text=TextMatchPredicate(column=cond.text_column, terms=cond.terms, k=cond.k),
+                k=cond.k,
+            )
         raise ValueError(f"condición no soportada: {type(cond).__name__}")
 
     # Elige el índice adecuado para el predicado
     def _index_type_for(self, predicate: Any, table: str | None = None, catalog: Any = None):
         if predicate is None:
             return None
+        # La búsqueda combinada se reporta con su propio nombre
+        if predicate.kind is PredicateKind.HYBRID:
+            return "hybrid"
         registered = self._registered_index(catalog, table, predicate.column)
         if registered is not None:
             return registered
@@ -115,7 +126,7 @@ class QueryPlanner(Planner):
             predicate = self._to_predicate(ast.where)
             # El k propio del predicado tiene prioridad sobre el LIMIT
             k = ast.limit
-            if isinstance(predicate, KnnPredicate):
+            if isinstance(predicate, (KnnPredicate, HybridPredicate)):
                 k = predicate.k
             elif isinstance(predicate, TextMatchPredicate) and predicate.k is not None:
                 k = predicate.k

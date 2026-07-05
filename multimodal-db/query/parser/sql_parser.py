@@ -85,6 +85,15 @@ class _AstBuilder(Transformer):
         k = int(items[2]) if len(items) > 2 else None
         return A.MatchCondition(column=str(items[0]), terms=terms, k=k)
 
+    def hybrid_predicate(self, items):
+        return A.HybridCondition(
+            column=str(items[0]),
+            media_file=str(items[1])[1:-1],
+            text_column=str(items[2]),
+            terms=str(items[3])[1:-1],
+            k=int(items[4]),
+        )
+
     def limit_clause(self, items):
         return int(items[0])
 

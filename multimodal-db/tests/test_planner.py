@@ -5,6 +5,7 @@ from query.planner import QueryPlanner
 from query.plan_types import PlanOp
 from indices.ports import (
     EqualityPredicate,
+    HybridPredicate,
     KnnPredicate,
     RangePredicate,
     SpatialRangePredicate,
@@ -151,3 +152,25 @@ def test_select_match_without_k_uses_limit(plan):
 def test_unsupported_operator_raises(plan):
     with pytest.raises(ValueError):
         plan("DELETE FROM img WHERE id != 5")
+
+
+def test_select_hybrid_builds_composite_predicate(plan):
+    q = plan('SELECT * FROM tracks WHERE HYBRID(feat, "q.wav", lyrics, "love night", 5)')
+    assert isinstance(q.predicate, HybridPredicate)
+    assert isinstance(q.predicate.media, KnnPredicate)
+    assert isinstance(q.predicate.text, TextMatchPredicate)
+    assert q.predicate.media.column == "feat"
+    assert q.predicate.media.query == "q.wav"
+    assert q.predicate.text.column == "lyrics"
+    assert q.predicate.text.terms == "love night"
+    assert q.k == 5
+
+
+def test_select_hybrid_reports_hybrid_index(plan):
+    q = plan('SELECT * FROM tracks WHERE HYBRID(feat, "q.wav", lyrics, "love", 3)')
+    assert q.index_type == "hybrid"
+
+
+def test_select_hybrid_k_overrides_limit(plan):
+    q = plan('SELECT * FROM tracks WHERE HYBRID(feat, "q.wav", lyrics, "love", 4) LIMIT 9')
+    assert q.k == 4

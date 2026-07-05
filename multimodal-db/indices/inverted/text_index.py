@@ -111,15 +111,17 @@ class InvertedIndex(Index):
         # Cada documento padre sale una sola vez con el score de su mejor chunk
         seen: set[str] = set()
         records: list[Any] = []
-        for chunk_id, _score in self.rank(query):
+        scores: list[float] = []
+        for chunk_id, score in self.rank(query):
             parent_id = self._chunk_parent.get(chunk_id, chunk_id)
             if parent_id in seen or parent_id not in self._documents:
                 continue
             seen.add(parent_id)
             records.append(self._documents[parent_id])
+            scores.append(score)
             if limit is not None and len(records) >= limit:
                 break
-        return OperationResult(records=records, io=self._stats())
+        return OperationResult(records=records, scores=scores, io=self._stats())
 
     def rank(self, query: str, k: int | None = None) -> list[tuple[str, float]]:
         query_tf: dict[str, int] = {}

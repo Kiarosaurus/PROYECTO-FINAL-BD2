@@ -10,6 +10,7 @@ _SCAN = {
     PredicateKind.KNN: "KNN Index Scan",
     PredicateKind.SPATIAL_RANGE: "Spatial Index Scan",
     PredicateKind.TEXT_MATCH: "Text Search Scan",
+    PredicateKind.HYBRID: "Hybrid Fusion Scan",
 }
 
 
@@ -97,7 +98,13 @@ def _explain_select(plan: QueryPlan, result: ResultSet) -> list[tuple[int, str]]
     else:
         root = f"Seq Scan on {plan.table}"
     lines = [(0, f"{root}  {_measured(result)}")]
-    if pred is not None:
+    if pred is not None and pred.kind is PredicateKind.HYBRID:
+        # Cada rama de la fusión se muestra como un escaneo hijo
+        lines.append((1, f"Branch: {_SCAN[pred.media.kind]} on {pred.media.column}"))
+        lines.append((2, _condition(pred.media)))
+        lines.append((1, f"Branch: {_SCAN[pred.text.kind]} on {pred.text.column}"))
+        lines.append((2, _condition(pred.text)))
+    elif pred is not None:
         cond = _condition(pred)
         if cond is not None:
             lines.append((1, cond))
