@@ -42,10 +42,12 @@ class IndexFactory(ABC):
 # Fábrica que entrega los índices reales del engine
 class EngineIndexFactory(IndexFactory):
 
-    def __init__(self, buffer_capacity: int = 64) -> None:
+    def __init__(self, buffer_capacity: int = 64, media_resolver: Any = None) -> None:
         self._buffer_capacity = buffer_capacity
         # Un solo buffer por storage para que el I/O se cuente en un solo lugar
         self._buffers: dict[int, Any] = {}
+        # Resolver de archivos compartido por los índices multimedia
+        self._media_resolver = media_resolver
 
     def create(
         self,
@@ -61,7 +63,7 @@ class EngineIndexFactory(IndexFactory):
         from multimedia.knn_index import MultimediaKNNIndex
 
         if index_type is IndexType.KNN:
-            return MultimediaKNNIndex()
+            return MultimediaKNNIndex(resolver=self._media_resolver)
         table, column = self._table_and_column(schema)
         buffer = self._buffer_for(storage)
         file_id = f"{index_type.value}_{table}_{column}"

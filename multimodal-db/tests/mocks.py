@@ -10,6 +10,7 @@ from core.ports.buffer import BufferManager, Page
 from core.ports.index import Index
 from multimedia.ports.extractor import FeatureExtractor
 from multimedia.ports.codebook import Codebook
+from multimedia.ports.resolver import MediaResolver
 from query.ports import Parser, Planner, Executor
 from query.plan_types import PlanOp, QueryPlan, ResultSet
 from query.index_factory import IndexFactory, IndexType
@@ -130,6 +131,21 @@ class MockCodebook(Codebook):
 
     def save(self, sink: StorageEngine) -> None:
         return None
+
+
+# Convierte nombres de archivo en vectores fijos
+class MockMediaResolver(MediaResolver):
+
+    def __init__(self, table: dict[str, list[float]] | None = None) -> None:
+        self._table = table or {}
+
+    def resolve(self, file_path: str) -> np.ndarray:
+        if file_path not in self._table:
+            raise ValueError(f"archivo no encontrado: {file_path}")
+        return np.asarray(self._table[file_path], dtype=np.float32)
+
+    def supported_formats(self) -> list[str]:
+        return [".png"]
 
 
 # Devuelve el mismo texto

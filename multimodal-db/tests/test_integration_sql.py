@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import cv2
+import numpy as np
 import pytest
 
 from core.storage.file_engine import FileStorageEngine
@@ -79,6 +81,59 @@ def test_session_with_catalog_makes_planner_respect_created_index(tmp_path: Path
     assert result.rows == [("a.jpg",)]
     # Sin catálogo el planner sugiere hash, con catálogo respeta el bplus creado
     assert result.index_type == "bplus"
+
+
+def _write_noise_image(path: Path, seed: int) -> None:
+    rng = np.random.default_rng(seed)
+    image = rng.integers(0, 255, size=(64, 64), dtype=np.uint8)
+    cv2.imwrite(str(path), image)
+
+
+def test_sql_knn_by_file_uses_media_resolver(tmp_path: Path) -> None:
+    from multimedia.codebook.kmeans_codebook import KMeansCodebook
+    from multimedia.extractors.sift_extractor import SIFTExtractor
+    from multimedia.resolver import PipelineMediaResolver
+
+    media_dir = tmp_path / "uploads"
+    media_dir.mkdir()
+    _write_noise_image(media_dir / "a.png", seed=1)
+    _write_noise_image(media_dir / "b.png", seed=2)
+    _write_noise_image(media_dir / "c.png", seed=3)
+    # La consulta es una copia exacta de a.png para fijar el primer resultado
+    (media_dir / "query.png").write_bytes((media_dir / "a.png").read_bytes())
+
+    resolver = PipelineMediaResolver(SIFTExtractor(), KMeansCodebook(k=4), media_dir)
+    executor = QueryExecutor(
+        EngineIndexFactory(media_resolver=resolver),
+        FileStorageEngine(tmp_path / "storage"),
+    )
+    parser, planner = SqlParser(), QueryPlanner()
+
+    def run(sql: str):
+        return executor.execute(planner.plan(parser.parse(sql)))
+
+    run("CREATE TABLE media (id INT, feat VECTOR)")
+    run("CREATE INDEX ON media (feat) USING knn")
+    run('INSERT INTO media (id, feat) VALUES (1, "a.png"), (2, "b.png"), (3, "c.png")')
+    result = run('SELECT * FROM media WHERE KNN(feat, "query.png", 3)')
+
+    hits = [record for (record,) in result.rows]
+    scores = [score for _key, score in hits]
+    # El filtro de candidatos puede descartar imágenes sin visual words comunes
+    assert len(hits) >= 2
+    assert hits[0][0] == "a.png"
+    assert scores == sorted(scores, reverse=True)
+    assert {key for key, _score in hits} <= {"a.png", "b.png", "c.png"}
+    assert result.index_type == "knn"
+
+
+def test_sql_knn_by_file_without_resolver_returns_empty(run) -> None:
+    run("CREATE TABLE media (id INT, feat VECTOR)")
+    run("CREATE INDEX ON media (feat) USING knn")
+
+    result = run('SELECT * FROM media WHERE KNN(feat, "query.png", 3)')
+
+    assert result.rows == []
 
 
 def test_sql_delete_removes_from_real_index(run) -> None:

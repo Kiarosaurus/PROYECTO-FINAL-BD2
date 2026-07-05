@@ -45,6 +45,17 @@ _ERROR_LABELS = {
 }
 
 
+# Arma el resolver de imágenes si sus librerías están disponibles
+def _build_media_resolver(media_dir: Path):
+    try:
+        from multimedia.codebook.kmeans_codebook import KMeansCodebook
+        from multimedia.extractors.sift_extractor import SIFTExtractor
+        from multimedia.resolver import PipelineMediaResolver
+    except ImportError:
+        return None
+    return PipelineMediaResolver(SIFTExtractor(), KMeansCodebook(k=32), media_dir)
+
+
 # Elige el medio de almacenamiento según el entorno
 def _build_storage() -> StorageEngine:
     backend = os.environ.get("STORAGE_BACKEND", "file").lower()
@@ -71,12 +82,14 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    upload_dir = Path("uploads")
+    upload_dir.mkdir(exist_ok=True)
+    app.state.upload_dir = upload_dir
     app.state.parser = SqlParser()
     app.state.planner = QueryPlanner()
-    app.state.executor = QueryExecutor(EngineIndexFactory(), _build_storage())
+    factory = EngineIndexFactory(media_resolver=_build_media_resolver(upload_dir))
+    app.state.executor = QueryExecutor(factory, _build_storage())
     app.state.catalog = Catalog()
-    app.state.upload_dir = Path("uploads")
-    app.state.upload_dir.mkdir(exist_ok=True)
 
     @app.exception_handler(StarletteHTTPException)
     async def on_http_error(request, exc: StarletteHTTPException) -> JSONResponse:

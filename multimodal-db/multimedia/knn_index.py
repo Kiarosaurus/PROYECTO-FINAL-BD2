@@ -2,35 +2,50 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from typing import Iterable
+from typing import Any, Iterable
 
 import numpy as np
 
 from core.metrics import IOStats, OperationResult
 from core.ports.index import Index, Key, Predicate, Record
 from core.ports.storage import StorageEngine
+from multimedia.ports.resolver import MediaResolver
 
 
 class MultimediaKNNIndex(Index):
     # Guarda histogramas en memoria indexados por clave
-    def __init__(self, candidate_ratio: float = 0.5) -> None:
+    def __init__(
+        self,
+        candidate_ratio: float = 0.5,
+        resolver: MediaResolver | None = None,
+    ) -> None:
         self._vectors: dict[str, np.ndarray] = {}
         # Lista invertida: visual word -> lista de claves que la contienen
         self._inverted: dict[int, list[str]] = defaultdict(list)
         # Fracción mínima de candidatos a revisar si el filtro es muy agresivo
         self._candidate_ratio = candidate_ratio
+        # Convierte nombres de archivo en histogramas cuando está presente
+        self._resolver = resolver
 
     def build(self, records: Iterable[Record]) -> OperationResult:
         # Cada record es una tupla (track_id, histograma)
         io = IOStats()
         count = 0
         for key, vector in records:
-            self._add_to_index(str(key), np.asarray(vector, dtype=np.float32))
+            try:
+                self._add_to_index(str(key), self._as_vector(vector))
+            except (TypeError, ValueError) as error:
+                return OperationResult.failure(str(error))
             count += 1
         return OperationResult(affected=count, io=io)
 
     def insert(self, key: Key, record: Record) -> OperationResult:
-        self._add_to_index(str(key), np.asarray(record, dtype=np.float32))
+        # Cuando llega la fila completa el vector sale de la clave
+        value = key if isinstance(record, dict) else record
+        try:
+            self._add_to_index(str(key), self._as_vector(value))
+        except (TypeError, ValueError) as error:
+            return OperationResult.failure(str(error))
         return OperationResult(affected=1)
 
     def search(self, predicate: Predicate, k: int | None = None) -> OperationResult:
@@ -40,12 +55,15 @@ class MultimediaKNNIndex(Index):
             if k is not None:
                 keys = keys[:k]
             return OperationResult(records=[(key, 0.0) for key in keys])
-        # Acepta un KnnPredicate o el histograma directo
+        # Acepta un KnnPredicate, un histograma directo o un nombre de archivo
         if hasattr(predicate, "query"):
             if k is None:
                 k = getattr(predicate, "k", None)
             predicate = predicate.query
-        query = np.asarray(predicate, dtype=np.float32)
+        try:
+            query = self._as_vector(predicate)
+        except (TypeError, ValueError) as error:
+            return OperationResult.failure(str(error))
         if len(self._vectors) == 0:
             return OperationResult(records=[])
         k = k or 10
@@ -78,6 +96,14 @@ class MultimediaKNNIndex(Index):
             if key in lst:
                 lst.remove(key)
         return OperationResult(affected=1)
+
+    # Convierte el valor recibido en un vector usable
+    def _as_vector(self, value: Any) -> np.ndarray:
+        if isinstance(value, str):
+            if self._resolver is None:
+                raise ValueError(f"sin resolver configurado para el archivo: {value}")
+            return np.asarray(self._resolver.resolve(value), dtype=np.float32)
+        return np.asarray(value, dtype=np.float32)
 
     def _add_to_index(self, key: str, vector: np.ndarray) -> None:
         self._vectors[key] = vector
