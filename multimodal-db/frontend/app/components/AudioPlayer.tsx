@@ -28,8 +28,11 @@ export default function AudioPlayer({ result }: { result: QueryResult }) {
   const items: string[] = [];
   for (const row of result.rows) {
     for (const cell of row) {
-      if (isAudio(cell)) {
-        items.push(cell);
+      // Una celda KNN trae una lista con el archivo y su score
+      for (const value of Array.isArray(cell) ? cell : [cell]) {
+        if (isAudio(value)) {
+          items.push(value);
+        }
       }
     }
   }

@@ -36,7 +36,17 @@ AUDIO_DIR = os.environ.get("SEED_AUDIO_DIR", "")
 AUDIO_EXT = (".wav", ".mp3", ".ogg")
 
 # Frecuencias de los tonos sintéticos del seed
-_SINE_FREQS = (220, 880, 3520)
+_SINE_FREQS = (220, 330, 440, 880, 1760, 3520)
+
+# Letras cortas para probar la búsqueda de texto
+_SONGS = [
+    (1, "Luna de abril", "La luna llena ilumina la noche y el corazón espera en silencio"),
+    (2, "Camino al mar", "El camino baja hasta el mar y la sal se queda en la piel"),
+    (3, "Fuego lento", "Un fuego lento quema el corazón cuando la noche se hace larga"),
+    (4, "Viento norte", "El viento del norte trae lluvia fría sobre la ciudad dormida"),
+    (5, "Guitarra rota", "Mi guitarra rota todavía canta canciones de amor en la noche"),
+    (6, "Sol de enero", "El sol de enero calienta la plaza mientras baila la gente"),
+]
 
 # PNG de 1x1 usado cuando no hay imágenes locales
 _PNG_1X1 = base64.b64decode(
@@ -57,7 +67,7 @@ def _tiny_wav() -> bytes:
 
 
 # Arma un WAV senoidal reproducible con la frecuencia pedida
-def _sine_wav(freq: int, seconds: float = 2.0, rate: int = 8000) -> bytes:
+def _sine_wav(freq: int, seconds: float = 4.0, rate: int = 8000) -> bytes:
     total = int(seconds * rate)
     samples = b"".join(
         struct.pack("<h", int(12000 * math.sin(2 * math.pi * freq * n / rate)))
@@ -127,6 +137,26 @@ def _drive_images() -> list[str]:
     return _images_in(DRIVE_CACHE)
 
 
+# Genera imágenes de ruido con suficientes keypoints para SIFT
+def _noise_images() -> list[str]:
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return []
+    cache = os.path.join(tempfile.gettempdir(), "mmdb_images")
+    os.makedirs(cache, exist_ok=True)
+    paths = []
+    for seed in range(1, 7):
+        path = os.path.join(cache, f"noise_{seed}.png")
+        if not os.path.isfile(path):
+            rng = np.random.default_rng(seed)
+            image = rng.integers(0, 255, size=(128, 128), dtype=np.uint8)
+            cv2.imwrite(path, image)
+        paths.append(path)
+    return paths
+
+
 # Decide de dónde salen las imágenes del seed
 def _image_source() -> tuple[list[str], str]:
     local = _images_in(IMAGES_DIR)
@@ -135,7 +165,7 @@ def _image_source() -> tuple[list[str], str]:
     drive = _drive_images()
     if drive:
         return drive, f"drive:{DRIVE_FOLDER_ID}"
-    return [], "synthetic"
+    return _noise_images(), "synthetic"
 
 
 def run_query(client: httpx.Client, sql: str) -> dict:
@@ -220,8 +250,44 @@ def _seed_synthetic(client: httpx.Client) -> list[tuple]:
     return [(1, "demo.png"), (2, "demo.wav")]
 
 
+# Sube una copia del primer archivo como consulta de ejemplo con nombre fijo
+def _upload_query_copy(client: httpx.Client, paths: list[str], query_name: str) -> None:
+    if not paths:
+        return
+    content_type = mimetypes.guess_type(query_name)[0] or "application/octet-stream"
+    with open(paths[0], "rb") as handle:
+        upload(client, query_name, handle.read(), content_type)
+
+
+# Crea la tabla de letras con su índice de texto
+def _seed_songs(client: httpx.Client) -> None:
+    run_query(client, "CREATE TABLE songs (id INT, title TEXT, lyrics TEXT)")
+    run_query(client, "CREATE INDEX ON songs (lyrics) USING inverted")
+    values = ", ".join(f'({i}, "{title}", "{lyrics}")' for i, title, lyrics in _SONGS)
+    run_query(client, f"INSERT INTO songs (id, title, lyrics) VALUES {values}")
+
+
+# Crea una tabla con índice knn sobre archivos ya subidos
+def _seed_knn_table(client: httpx.Client, table: str, column: str, names: list[str]) -> None:
+    if len(names) < 2:
+        print(f"{table}: se omite el índice knn por falta de archivos")
+        return
+    run_query(client, f"CREATE TABLE {table} (id INT, {column} VECTOR)")
+    run_query(client, f"CREATE INDEX ON {table} ({column}) USING knn")
+    values = ", ".join(f'({i}, "{name}")' for i, name in enumerate(names, start=1))
+    run_query(client, f"INSERT INTO {table} (id, {column}) VALUES {values}")
+
+
+# Corre una consulta de ejemplo y muestra sus primeras filas
+def _print_sample(client: httpx.Client, sql: str) -> None:
+    result = run_query(client, sql)
+    print("query:", sql)
+    for row in result["rows"][:5]:
+        print("  row:", row)
+
+
 def main() -> None:
-    with httpx.Client(timeout=30) as client:
+    with httpx.Client(timeout=120) as client:
         client.get(f"{API_URL}/health").raise_for_status()
 
         run_query(client, "CREATE TABLE media (id INT, path TEXT)")
@@ -239,10 +305,25 @@ def main() -> None:
         for row in result["rows"]:
             print("row:", row)
 
-    _knn_demo(images)
+        audios, audio_source = _audio_source()
+        print("audio source:", audio_source)
+        audio_rows = _seed_from_folder(client, audios)
 
-    audios, audio_source = _audio_source()
-    print("audio source:", audio_source)
+        # Los archivos de consulta deben existir antes de armar los índices knn
+        _upload_query_copy(client, images, "demo_query.png")
+        _upload_query_copy(client, audios, "demo_query.wav")
+
+        _seed_songs(client)
+        photo_names = [name for _i, name in rows] if images else []
+        _seed_knn_table(client, "photos", "img", photo_names)
+        _seed_knn_table(client, "tracks", "audio", [name for _i, name in audio_rows])
+
+        # Las mismas consultas que ofrecen los snippets del frontend
+        _print_sample(client, 'SELECT * FROM songs WHERE MATCH(lyrics, "corazón noche", 3)')
+        _print_sample(client, 'SELECT * FROM photos WHERE KNN(img, "demo_query.png", 5)')
+        _print_sample(client, 'SELECT * FROM tracks WHERE KNN(audio, "demo_query.wav", 3)')
+
+    _knn_demo(images)
     _audio_knn_demo(audios)
 
 

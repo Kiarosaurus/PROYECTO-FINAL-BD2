@@ -32,8 +32,11 @@ export default function MediaGallery({ result }: { result: QueryResult }) {
   const items: string[] = [];
   for (const row of result.rows) {
     for (const cell of row) {
-      if (isImage(cell)) {
-        items.push(cell);
+      // Una celda KNN trae una lista con el archivo y su score
+      for (const value of Array.isArray(cell) ? cell : [cell]) {
+        if (isImage(value)) {
+          items.push(value);
+        }
       }
     }
   }

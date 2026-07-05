@@ -12,6 +12,21 @@ const SNIPPETS: Snippet[] = [
   { label: "Rango", sql: "SELECT * FROM media WHERE id BETWEEN 1 AND 9" },
   { label: "KNN", sql: "SELECT * FROM media WHERE KNN(feat, [0.1, 0.2, 0.3], 5)" },
   { label: "Espacial", sql: "SELECT * FROM media WHERE WITHIN(box, [0, 0], [10, 10])" },
+  {
+    label: "MATCH texto",
+    sql: 'SELECT * FROM songs WHERE MATCH(lyrics, "corazón noche", 3)',
+    hint: "Requiere correr el seed (tests/seed_demo.py)",
+  },
+  {
+    label: "KNN imagen",
+    sql: 'SELECT * FROM photos WHERE KNN(img, "demo_query.png", 5)',
+    hint: "Requiere correr el seed (tests/seed_demo.py)",
+  },
+  {
+    label: "KNN audio",
+    sql: 'SELECT * FROM tracks WHERE KNN(audio, "demo_query.wav", 3)',
+    hint: "Requiere correr el seed (tests/seed_demo.py)",
+  },
 ];
 
 export default function SqlSnippets({ onPick }: { onPick: (sql: string) => void }) {
