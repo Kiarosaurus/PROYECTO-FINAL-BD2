@@ -6,6 +6,7 @@ __pycache__/
 venv/
 .env
 uploads/
+engine_data/
 
 # dataset local
 data/raw/*.csv

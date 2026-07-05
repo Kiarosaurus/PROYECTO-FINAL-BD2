@@ -45,7 +45,15 @@ class PgVectorIVFEngine(ComparisonEngine):
         with self._conn() as conn, conn.cursor() as cur:
             # ANALYZE asegura estadísticas actualizadas antes de reconstruir
             cur.execute("ANALYZE compare.media")
-            cur.execute("REINDEX INDEX compare.idx_media_ivfflat")
+            if kind == "IVFFlat":
+                cur.execute("REINDEX INDEX compare.idx_media_ivfflat")
+            else:
+                # El HNSW se crea recién acá porque init.sql solo trae el IVFFlat
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_media_hnsw "
+                    "ON compare.media USING hnsw (feature_vec vector_cosine_ops)"
+                )
+                cur.execute("REINDEX INDEX compare.idx_media_hnsw")
             conn.commit()
 
     def query(self, q: Any) -> BenchmarkResult:

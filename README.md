@@ -121,6 +121,14 @@ Para borrar también la data de postgres:
 docker compose down -v
 ```
 
+Nota: los scripts de `docker/postgres/init.sql` corren solo cuando el volumen
+`pg-data` arranca vacío. Si `init.sql` cambió después de la primera corrida,
+re-aplicarlo (es idempotente) sin borrar datos:
+
+```bash
+docker compose exec -T postgres psql -U mmdb -d multimodal < docker/postgres/init.sql
+```
+
 ### En local
 
 Backend (Python 3.12) desde la raíz del repo:
