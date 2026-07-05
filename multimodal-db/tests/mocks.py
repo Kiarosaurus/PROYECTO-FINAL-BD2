@@ -59,6 +59,10 @@ class MockBufferManager(BufferManager):
     def pin(self, page: Page) -> None:
         page.pin_count += 1
 
+    def unpin(self, page: Page) -> None:
+        if page.pin_count > 0:
+            page.pin_count -= 1
+
     def flush(self, file_id: str | None = None) -> None:
         for (fid, page_no), page in list(self._cache.items()):
             if file_id is not None and fid != file_id:
@@ -112,14 +116,17 @@ class MockFeatureExtractor(FeatureExtractor):
         return ["mock"]
 
 
-# Manda todo al grupo cero
+# Devuelve siempre un histograma vacío
 class MockCodebook(Codebook):
+
+    def __init__(self, k: int = 8) -> None:
+        self._k = k
 
     def fit(self, descriptors: np.ndarray) -> None:
         return None
 
     def quantize(self, descriptors: np.ndarray) -> np.ndarray:
-        return np.zeros(len(descriptors), dtype=np.int64)
+        return np.zeros(self._k, dtype=np.float32)
 
     def save(self, sink: StorageEngine) -> None:
         return None

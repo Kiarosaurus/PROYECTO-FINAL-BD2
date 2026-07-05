@@ -15,7 +15,7 @@ class Codebook(ABC):
     def fit(self, descriptors: np.ndarray) -> None:
         ...
 
-    # Asigna cada dato a su grupo
+    # Convierte los descriptores en un histograma ponderado de grupos
     @abstractmethod
     def quantize(self, descriptors: np.ndarray) -> np.ndarray:
         ...

@@ -9,6 +9,8 @@ from query.executor import QueryExecutor
 from query.index_factory import EngineIndexFactory
 from query.parser.sql_parser import SqlParser
 from query.planner import QueryPlanner
+from service.catalog import Catalog
+from service.session import Session
 
 
 @pytest.fixture
@@ -63,6 +65,20 @@ def test_sql_spatial_query_uses_real_rtree(run) -> None:
 
     assert executor_result.rows == []
     assert executor_result.index_type == "rtree"
+
+
+def test_session_with_catalog_makes_planner_respect_created_index(tmp_path: Path) -> None:
+    executor = QueryExecutor(EngineIndexFactory(), FileStorageEngine(tmp_path))
+    session = Session(SqlParser(), QueryPlanner(), executor, Catalog())
+
+    session.execute("CREATE TABLE img (id INT, path TEXT)")
+    session.execute("CREATE INDEX ON img (id) USING bplus")
+    session.execute('INSERT INTO img (id, path) VALUES (1, "a.jpg")')
+    result = session.execute("SELECT path FROM img WHERE id = 1")
+
+    assert result.rows == [("a.jpg",)]
+    # Sin catálogo el planner sugiere hash, con catálogo respeta el bplus creado
+    assert result.index_type == "bplus"
 
 
 def test_sql_delete_removes_from_real_index(run) -> None:

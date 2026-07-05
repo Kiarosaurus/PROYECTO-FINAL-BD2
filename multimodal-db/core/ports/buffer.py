@@ -3,6 +3,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from core.metrics import IOStats
+
 
 @dataclass
 class Page:
@@ -29,5 +31,17 @@ class BufferManager(ABC):
         ...
 
     @abstractmethod
+    def unpin(self, page: Page) -> None:
+        ...
+
+    @abstractmethod
     def flush(self, file_id: str | None = None) -> None:
+        ...
+
+    @abstractmethod
+    def allocate_page(self, file_id: str) -> int:
+        ...
+
+    @abstractmethod
+    def stats(self) -> IOStats:
         ...

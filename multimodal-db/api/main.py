@@ -17,6 +17,7 @@ from query.parser.sql_parser import SqlParser
 from query.planner import QueryPlanner
 from query.executor import QueryExecutor
 from query.index_factory import EngineIndexFactory
+from service.catalog import Catalog
 
 # Rutas que se cargan solo si su módulo está presente
 _ROUTE_MODULES = [
@@ -73,6 +74,7 @@ def create_app() -> FastAPI:
     app.state.parser = SqlParser()
     app.state.planner = QueryPlanner()
     app.state.executor = QueryExecutor(EngineIndexFactory(), _build_storage())
+    app.state.catalog = Catalog()
     app.state.upload_dir = Path("uploads")
     app.state.upload_dir.mkdir(exist_ok=True)
 

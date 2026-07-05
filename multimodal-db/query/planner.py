@@ -61,10 +61,22 @@ class QueryPlanner(Planner):
         raise ValueError(f"condición no soportada: {type(cond).__name__}")
 
     # Elige el índice adecuado para el predicado
-    def _index_type_for(self, predicate: Any):
+    def _index_type_for(self, predicate: Any, table: str | None = None, catalog: Any = None):
         if predicate is None:
             return None
+        registered = self._registered_index(catalog, table, predicate.column)
+        if registered is not None:
+            return registered
         return _INDEX_BY_KIND.get(predicate.kind)
+
+    # Si la columna ya tiene un índice creado, el catálogo manda
+    def _registered_index(self, catalog: Any, table: str | None, column: str):
+        if catalog is None or table is None or not catalog.has_table(table):
+            return None
+        for index in catalog.get_table(table).indexes:
+            if index.column == column:
+                return index.index_type
+        return None
 
     def plan(self, ast: Any, catalog: Any = None) -> QueryPlan:
         if isinstance(ast, A.CreateTable):
@@ -105,6 +117,6 @@ class QueryPlanner(Planner):
                 columns=list(ast.columns),
                 predicate=predicate,
                 k=k,
-                index_type=self._index_type_for(predicate),
+                index_type=self._index_type_for(predicate, ast.table, catalog),
             )
         raise ValueError(f"sentencia no soportada: {type(ast).__name__}")

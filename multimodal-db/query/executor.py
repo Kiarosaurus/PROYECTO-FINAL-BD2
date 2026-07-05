@@ -22,6 +22,8 @@ class QueryExecutor(Executor):
         self._tables: dict[str, list[str]] = {}
         # Índice guardado por tabla y columna
         self._indexes: dict[tuple[str, str], Any] = {}
+        # Nombre del tipo de índice creado por tabla y columna
+        self._index_types: dict[tuple[str, str], str] = {}
 
     def execute(self, plan: QueryPlan) -> ResultSet:
         start = time.perf_counter()
@@ -36,7 +38,9 @@ class QueryExecutor(Executor):
             pages_allocated=stats.pages_allocated - allocs,
         )
         result.elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
-        result.index_type = plan.index_type
+        # El índice real usado pisa la sugerencia del planner
+        if result.index_type is None:
+            result.index_type = plan.index_type
         if plan.predicate is not None:
             result.predicate_kind = plan.predicate.kind.name.lower()
         result.explain = build_explain(plan, result)
@@ -65,6 +69,7 @@ class QueryExecutor(Executor):
         self._tables.pop(plan.table, None)
         for key in [k for k in self._indexes if k[0] == plan.table]:
             del self._indexes[key]
+            self._index_types.pop(key, None)
         return ResultSet()
 
     def _create_index(self, plan: QueryPlan) -> ResultSet:
@@ -76,6 +81,7 @@ class QueryExecutor(Executor):
         }
         index = self._factory.create(index_type, schema, self._storage)
         self._indexes[(plan.table, plan.columns[0])] = index
+        self._index_types[(plan.table, plan.columns[0])] = index_type.value
         return ResultSet()
 
     def _insert(self, plan: QueryPlan) -> ResultSet:
@@ -105,22 +111,23 @@ class QueryExecutor(Executor):
     def _select(self, plan: QueryPlan) -> ResultSet:
         pred = plan.predicate
         if pred is not None:
-            index = self._indexes.get((plan.table, pred.column))
+            key = (plan.table, pred.column)
+            index = self._indexes.get(key)
         else:
-            index = self._any_index(plan.table)
+            key, index = self._any_index(plan.table)
         records: list[Any] = []
         if index is not None:
             result = index.search(pred, plan.k)
             records = result.records
         columns, rows = self._project(plan, records)
-        return ResultSet(columns=columns, rows=rows)
+        return ResultSet(columns=columns, rows=rows, index_type=self._index_types.get(key))
 
     # Busca cualquier índice de la tabla para un escaneo sin filtro
-    def _any_index(self, table: str) -> Any:
-        for (name, _column), index in self._indexes.items():
-            if name == table:
-                return index
-        return None
+    def _any_index(self, table: str) -> tuple[tuple[str, str] | None, Any]:
+        for key, index in self._indexes.items():
+            if key[0] == table:
+                return key, index
+        return None, None
 
     # Deja solo las columnas pedidas en cada fila
     def _project(self, plan: QueryPlan, records: list[Any]):
