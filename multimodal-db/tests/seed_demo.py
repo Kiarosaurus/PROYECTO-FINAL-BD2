@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import base64
 import io
+import math
 import mimetypes
 import os
+import struct
 import tempfile
 import wave
 
@@ -28,6 +30,14 @@ DRIVE_CACHE = os.environ.get(
 
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 
+# Carpeta local con audios reales para el seed
+AUDIO_DIR = os.environ.get("SEED_AUDIO_DIR", "")
+
+AUDIO_EXT = (".wav", ".mp3", ".ogg")
+
+# Frecuencias de los tonos sintéticos del seed
+_SINE_FREQS = (220, 880, 3520)
+
 # PNG de 1x1 usado cuando no hay imágenes locales
 _PNG_1X1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
@@ -44,6 +54,50 @@ def _tiny_wav() -> bytes:
         wav.setframerate(8000)
         wav.writeframes(b"\x00\x00" * 800)
     return buffer.getvalue()
+
+
+# Arma un WAV senoidal reproducible con la frecuencia pedida
+def _sine_wav(freq: int, seconds: float = 2.0, rate: int = 8000) -> bytes:
+    total = int(seconds * rate)
+    samples = b"".join(
+        struct.pack("<h", int(12000 * math.sin(2 * math.pi * freq * n / rate)))
+        for n in range(total)
+    )
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(samples)
+    return buffer.getvalue()
+
+
+# Lista los audios de una carpeta que existe
+def _audios_in(folder: str) -> list[str]:
+    if not folder or not os.path.isdir(folder):
+        return []
+    paths = []
+    for name in sorted(os.listdir(folder)):
+        if name.lower().endswith(AUDIO_EXT):
+            paths.append(os.path.join(folder, name))
+    return paths
+
+
+# Decide de dónde salen los audios del seed
+def _audio_source() -> tuple[list[str], str]:
+    local = _audios_in(AUDIO_DIR)
+    if local:
+        return local, AUDIO_DIR
+    cache = os.path.join(tempfile.gettempdir(), "mmdb_audio")
+    os.makedirs(cache, exist_ok=True)
+    paths = []
+    for freq in _SINE_FREQS:
+        path = os.path.join(cache, f"tone_{freq}.wav")
+        if not os.path.isfile(path):
+            with open(path, "wb") as handle:
+                handle.write(_sine_wav(freq))
+        paths.append(path)
+    return paths, "synthetic"
 
 
 # Lista las imágenes de una carpeta que existe
@@ -134,6 +188,31 @@ def _knn_demo(paths: list[str]) -> None:
         print(f"knn hit: {key} score={score:.3f}")
 
 
+# Construye el índice KNN de audio y muestra una búsqueda de ejemplo
+def _audio_knn_demo(paths: list[str]) -> None:
+    if len(paths) < 2:
+        return
+    from multimedia.codebook.kmeans_codebook import KMeansCodebook
+    from multimedia.extractors.mfcc_extractor import MFCCExtractor
+    from multimedia.knn_index import MultimediaKNNIndex
+    from multimedia.pipeline import MultimediaPipeline
+
+    pipeline = MultimediaPipeline(MFCCExtractor(), KMeansCodebook(k=8), MultimediaKNNIndex())
+    try:
+        result = pipeline.build_from_files(paths)
+    except ValueError as error:
+        print("audio knn: no se pudo entrenar el codebook:", error)
+        return
+    if not result.success:
+        print("audio knn:", result.message)
+        return
+    query = paths[0]
+    top = pipeline.search_file(query, k=3)
+    print("audio knn query:", os.path.basename(query))
+    for key, score in top.records:
+        print(f"audio knn hit: {key} score={score:.3f}")
+
+
 # Sube datos sintéticos y devuelve las filas a insertar
 def _seed_synthetic(client: httpx.Client) -> list[tuple]:
     upload(client, "demo.png", _PNG_1X1, "image/png")
@@ -161,6 +240,10 @@ def main() -> None:
             print("row:", row)
 
     _knn_demo(images)
+
+    audios, audio_source = _audio_source()
+    print("audio source:", audio_source)
+    _audio_knn_demo(audios)
 
 
 if __name__ == "__main__":

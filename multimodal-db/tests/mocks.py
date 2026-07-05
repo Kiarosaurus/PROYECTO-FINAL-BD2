@@ -136,8 +136,13 @@ class MockCodebook(Codebook):
 # Convierte nombres de archivo en vectores fijos
 class MockMediaResolver(MediaResolver):
 
-    def __init__(self, table: dict[str, list[float]] | None = None) -> None:
+    def __init__(
+        self,
+        table: dict[str, list[float]] | None = None,
+        formats: list[str] | None = None,
+    ) -> None:
         self._table = table or {}
+        self._formats = formats or [".png"]
 
     def resolve(self, file_path: str) -> np.ndarray:
         if file_path not in self._table:
@@ -145,7 +150,7 @@ class MockMediaResolver(MediaResolver):
         return np.asarray(self._table[file_path], dtype=np.float32)
 
     def supported_formats(self) -> list[str]:
-        return [".png"]
+        return self._formats
 
 
 # Devuelve el mismo texto

@@ -33,7 +33,7 @@ class PipelineMediaResolver(MediaResolver):
     def supported_formats(self) -> list[str]:
         return self._extractor.supported_formats()
 
-    # Busca el archivo como ruta directa o dentro de la carpeta de medios
+    # Busca el archivo como ruta directa, en la carpeta o en sus subcarpetas
     def _locate(self, file_path: str) -> Path:
         direct = Path(file_path)
         if direct.is_file():
@@ -41,6 +41,10 @@ class PipelineMediaResolver(MediaResolver):
         candidate = self._media_dir / direct.name
         if candidate.is_file():
             return candidate
+        if self._media_dir.is_dir():
+            for match in sorted(self._media_dir.rglob(direct.name)):
+                if match.is_file():
+                    return match
         raise ValueError(f"archivo no encontrado: {file_path}")
 
     # Entrena el codebook una sola vez con los archivos de la carpeta
@@ -63,7 +67,9 @@ class PipelineMediaResolver(MediaResolver):
         corpus: dict[str, np.ndarray] = {}
         if not self._media_dir.is_dir():
             return corpus
-        for path in sorted(self._media_dir.iterdir()):
+        for path in sorted(self._media_dir.rglob("*")):
+            if not path.is_file():
+                continue
             if path.suffix.lower() not in formats:
                 continue
             try:
@@ -74,3 +80,25 @@ class PipelineMediaResolver(MediaResolver):
                 continue
             corpus[path.name] = descriptors
         return corpus
+
+
+# Enruta cada archivo al resolver que acepta su extensión
+class CompositeMediaResolver(MediaResolver):
+
+    def __init__(self, resolvers: list[MediaResolver]) -> None:
+        self._resolvers = list(resolvers)
+
+    def resolve(self, file_path: str) -> np.ndarray:
+        suffix = Path(file_path).suffix.lower()
+        for resolver in self._resolvers:
+            if suffix in resolver.supported_formats():
+                return resolver.resolve(file_path)
+        raise ValueError(f"formato no soportado: {file_path}")
+
+    def supported_formats(self) -> list[str]:
+        formats: list[str] = []
+        for resolver in self._resolvers:
+            for fmt in resolver.supported_formats():
+                if fmt not in formats:
+                    formats.append(fmt)
+        return formats

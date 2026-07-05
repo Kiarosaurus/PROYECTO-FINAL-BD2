@@ -45,15 +45,30 @@ _ERROR_LABELS = {
 }
 
 
-# Arma el resolver de imágenes si sus librerías están disponibles
+# Arma el resolver multimedia con las modalidades disponibles
 def _build_media_resolver(media_dir: Path):
     try:
         from multimedia.codebook.kmeans_codebook import KMeansCodebook
-        from multimedia.extractors.sift_extractor import SIFTExtractor
-        from multimedia.resolver import PipelineMediaResolver
+        from multimedia.resolver import CompositeMediaResolver, PipelineMediaResolver
     except ImportError:
         return None
-    return PipelineMediaResolver(SIFTExtractor(), KMeansCodebook(k=32), media_dir)
+    resolvers = []
+    # Cada modalidad entra solo si sus librerías están disponibles
+    try:
+        from multimedia.extractors.sift_extractor import SIFTExtractor
+
+        resolvers.append(PipelineMediaResolver(SIFTExtractor(), KMeansCodebook(k=32), media_dir))
+    except ImportError:
+        pass
+    try:
+        from multimedia.extractors.mfcc_extractor import MFCCExtractor
+
+        resolvers.append(PipelineMediaResolver(MFCCExtractor(), KMeansCodebook(k=32), media_dir))
+    except ImportError:
+        pass
+    if not resolvers:
+        return None
+    return CompositeMediaResolver(resolvers)
 
 
 # Elige el medio de almacenamiento según el entorno

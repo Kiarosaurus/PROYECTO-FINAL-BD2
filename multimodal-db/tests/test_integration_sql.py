@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import wave
 from pathlib import Path
 
 import cv2
@@ -145,6 +146,59 @@ def test_sql_knn_by_file_uses_media_resolver(tmp_path: Path) -> None:
     assert hits[0][0] == "a.png"
     assert scores == sorted(scores, reverse=True)
     assert {key for key, _score in hits} <= {"a.png", "b.png", "c.png"}
+    assert result.index_type == "knn"
+
+
+def _write_sine_wav(path: Path, freq: float) -> None:
+    rate = 8000
+    t = np.arange(rate * 2) / rate
+    signal = (12000 * np.sin(2 * np.pi * freq * t)).astype(np.int16)
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(signal.tobytes())
+
+
+def test_sql_knn_audio_by_file_routes_to_mfcc_resolver(tmp_path: Path) -> None:
+    from multimedia.codebook.kmeans_codebook import KMeansCodebook
+    from multimedia.extractors.mfcc_extractor import MFCCExtractor
+    from multimedia.extractors.sift_extractor import SIFTExtractor
+    from multimedia.resolver import CompositeMediaResolver, PipelineMediaResolver
+
+    media_dir = tmp_path / "uploads"
+    media_dir.mkdir()
+    _write_sine_wav(media_dir / "low.wav", freq=220.0)
+    _write_sine_wav(media_dir / "mid.wav", freq=880.0)
+    _write_sine_wav(media_dir / "high.wav", freq=3520.0)
+    # La consulta usa una frecuencia casi igual a la del tono grave
+    _write_sine_wav(media_dir / "query.wav", freq=230.0)
+
+    resolver = CompositeMediaResolver(
+        [
+            PipelineMediaResolver(SIFTExtractor(), KMeansCodebook(k=4), media_dir),
+            PipelineMediaResolver(MFCCExtractor(), KMeansCodebook(k=4), media_dir),
+        ]
+    )
+    executor = QueryExecutor(
+        EngineIndexFactory(media_resolver=resolver),
+        FileStorageEngine(tmp_path / "storage"),
+    )
+    parser, planner = SqlParser(), QueryPlanner()
+
+    def run(sql: str):
+        return executor.execute(planner.plan(parser.parse(sql)))
+
+    run("CREATE TABLE tracks (id INT, feat VECTOR)")
+    run("CREATE INDEX ON tracks (feat) USING knn")
+    run('INSERT INTO tracks (id, feat) VALUES (1, "low.wav"), (2, "mid.wav"), (3, "high.wav")')
+    result = run('SELECT * FROM tracks WHERE KNN(feat, "query.wav", 2)')
+
+    hits = [record for (record,) in result.rows]
+    scores = [score for _key, score in hits]
+    assert len(hits) == 2
+    assert hits[0][0] == "low.wav"
+    assert scores == sorted(scores, reverse=True)
     assert result.index_type == "knn"
 
 

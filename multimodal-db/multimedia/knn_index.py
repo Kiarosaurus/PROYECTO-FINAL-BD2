@@ -47,6 +47,9 @@ class MultimediaKNNIndex(Index):
     def insert(self, key: Key, record: Record) -> OperationResult:
         # Cuando llega la fila completa el vector sale de la clave
         value = key if isinstance(record, dict) else record
+        # Un vector no identifica a la fila, la primera columna toma ese rol
+        if isinstance(record, dict) and not isinstance(value, str):
+            key = next(iter(record.values()), key)
         try:
             self._add_to_index(str(key), self._as_vector(value))
         except (TypeError, ValueError) as error:

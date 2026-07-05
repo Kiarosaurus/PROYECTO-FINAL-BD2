@@ -36,6 +36,12 @@ def test_insert_multiple_rows(parser):
     assert stmt.rows == [(1, "a.jpg"), (2, "b.jpg")]
 
 
+def test_insert_row_with_vector_literal(parser):
+    stmt = parser.parse("INSERT INTO tracks (id, feat) VALUES (1, [0.5, -1.0, 2])")
+    assert isinstance(stmt, A.Insert)
+    assert stmt.rows == [(1, [0.5, -1.0, 2])]
+
+
 def test_delete_no_where(parser):
     stmt = parser.parse("DELETE FROM img")
     assert isinstance(stmt, A.Delete)

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from indices.ports import KnnPredicate
 from multimedia.knn_index import MultimediaKNNIndex
+from multimedia.resolver import CompositeMediaResolver
 from tests.mocks import MockMediaResolver
 
 
@@ -72,3 +75,30 @@ def test_insert_unresolvable_record_fails_cleanly() -> None:
 
     assert result.success is False
     assert result.affected == 0
+
+
+def test_insert_vector_row_uses_first_column_as_key() -> None:
+    index = MultimediaKNNIndex()
+
+    inserted = index.insert([1.0, 0.0], {"id": 7, "feat": [1.0, 0.0]})
+    result = index.search([1.0, 0.0], k=1)
+
+    assert inserted.success is True
+    assert [key for key, _score in result.records] == ["7"]
+
+
+def test_composite_resolver_routes_by_extension() -> None:
+    image = MockMediaResolver({"a.png": [1.0, 0.0]})
+    audio = MockMediaResolver({"a.wav": [0.0, 1.0]}, formats=[".wav"])
+    composite = CompositeMediaResolver([image, audio])
+
+    assert composite.resolve("a.png").tolist() == [1.0, 0.0]
+    assert composite.resolve("a.wav").tolist() == [0.0, 1.0]
+    assert composite.supported_formats() == [".png", ".wav"]
+
+
+def test_composite_resolver_rejects_unknown_extension() -> None:
+    composite = CompositeMediaResolver([MockMediaResolver({})])
+
+    with pytest.raises(ValueError):
+        composite.resolve("a.txt")
