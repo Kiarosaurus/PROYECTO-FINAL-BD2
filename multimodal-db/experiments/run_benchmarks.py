@@ -19,10 +19,38 @@ VECTOR_DIM = 256
 VOCABULARY_SIZE = 500
 WORDS_PER_DOCUMENT = 20
 
+# Ruta por defecto del CSV de letras descargado de Drive
+LYRICS_CSV = Path(__file__).resolve().parents[2] / "data" / "raw" / "lyrics" / "lyrics_dataset.csv"
+
 
 # Genera un vocabulario sintético con palabras que el preprocessor no descarta
 def _vocabulary() -> list[str]:
     return [f"palabra{i:03d}" for i in range(VOCABULARY_SIZE)]
+
+
+# Carga las letras del CSV y devuelve una lista de textos
+def load_lyrics(csv_path: Path, limit: int) -> list[str]:
+    csv.field_size_limit(1_000_000)
+    documents = []
+    with open(csv_path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            lyrics = (row.get("lyrics") or "").strip()
+            if lyrics:
+                documents.append(lyrics)
+            if len(documents) >= limit:
+                break
+    return documents
+
+
+# Arma consultas con palabras tomadas de los propios documentos
+def queries_from_documents(documents: list[str], count: int, rng: np.random.Generator) -> list[str]:
+    queries = []
+    for _ in range(count):
+        words = documents[rng.integers(len(documents))].split()
+        words = [w for w in words if len(w) >= 4] or words
+        picked = rng.choice(words, size=min(2, len(words)), replace=False)
+        queries.append(" ".join(picked))
+    return queries
 
 
 # Genera documentos con palabras frecuentes y palabras raras
@@ -145,18 +173,26 @@ def run_benchmarks(
     seed: int = 42,
     dsn: str | None = None,
     make_plots: bool = True,
+    lyrics_csv: str | Path | None = None,
 ) -> list[dict]:
     rng = np.random.default_rng(seed)
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
     vocabulary = _vocabulary()
+    corpus: list[str] = []
+    if lyrics_csv and Path(lyrics_csv).is_file():
+        corpus = load_lyrics(Path(lyrics_csv), limit=max(sizes))
     for size in sizes:
-        documents = make_documents(size, rng)
-        text_queries = [
-            " ".join(rng.choice(vocabulary, size=2))
-            for _ in range(query_count)
-        ]
+        if corpus:
+            documents = corpus[:size]
+            text_queries = queries_from_documents(documents, query_count, rng)
+        else:
+            documents = make_documents(size, rng)
+            text_queries = [
+                " ".join(rng.choice(vocabulary, size=2))
+                for _ in range(query_count)
+            ]
         vectors = make_vectors(size, rng)
         vector_queries = vectors[: min(query_count, len(vectors))]
         with tempfile.TemporaryDirectory() as workdir:
@@ -222,14 +258,21 @@ def main() -> None:
     parser.add_argument("--queries", type=int, default=10)
     parser.add_argument("--out", default="experiments/results")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--lyrics-csv", default=str(LYRICS_CSV))
+    parser.add_argument("--synthetic", action="store_true", help="usa corpus sintético en vez del CSV")
     args = parser.parse_args()
     dsn = os.environ.get("POSTGRES_DSN")
+    lyrics_csv = None if args.synthetic else args.lyrics_csv
+    if lyrics_csv and not Path(lyrics_csv).is_file():
+        print(f"no se encontró {lyrics_csv}, se usa corpus sintético")
+        lyrics_csv = None
     rows = run_benchmarks(
         sizes=args.sizes,
         query_count=args.queries,
         out_dir=args.out,
         seed=args.seed,
         dsn=dsn,
+        lyrics_csv=lyrics_csv,
     )
     for row in rows:
         print(

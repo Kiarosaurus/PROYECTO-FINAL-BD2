@@ -8,8 +8,8 @@ venv/
 uploads/
 engine_data/
 
-# dataset local
-data/raw/*.csv
-data/raw/covers/
-data/manifest.json
-data/prep_full.log
+# dataset local descargado de Drive
+data/**
+!data/.gitkeep
+!data/raw/
+!data/raw/.gitkeep
