@@ -97,6 +97,35 @@ def test_spatial(parser):
     assert stmt.where.max_corner == [10, 10]
 
 
+def test_match_with_k(parser):
+    stmt = parser.parse('SELECT * FROM docs WHERE MATCH(body, "database systems", 5)')
+    assert isinstance(stmt.where, A.MatchCondition)
+    assert stmt.where.column == "body"
+    assert stmt.where.terms == "database systems"
+    assert stmt.where.k == 5
+
+
+def test_match_without_k(parser):
+    stmt = parser.parse('SELECT * FROM docs WHERE MATCH(body, "database")')
+    assert isinstance(stmt.where, A.MatchCondition)
+    assert stmt.where.terms == "database"
+    assert stmt.where.k is None
+
+
+def test_match_with_limit(parser):
+    stmt = parser.parse('SELECT id FROM docs WHERE MATCH(body, "query engine", 3) LIMIT 10')
+    assert isinstance(stmt.where, A.MatchCondition)
+    assert stmt.where.k == 3
+    assert stmt.limit == 10
+
+
+@pytest.mark.parametrize("kw", ["match", "Match", "MATCH"])
+def test_match_case_insensitive(parser, kw):
+    stmt = parser.parse(f'SELECT * FROM docs WHERE {kw}(body, "text", 2)')
+    assert isinstance(stmt.where, A.MatchCondition)
+    assert stmt.where.k == 2
+
+
 def test_string_value_unquoted(parser):
     stmt = parser.parse('DELETE FROM img WHERE path = "a.jpg"')
     assert stmt.where.value == "a.jpg"

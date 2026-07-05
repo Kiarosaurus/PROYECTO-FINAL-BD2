@@ -45,6 +45,13 @@ class SpatialCondition(Condition):
     max_corner: list
 
 
+# Busca los textos que más coinciden con los términos
+@dataclass
+class MatchCondition(Condition):
+    terms: str
+    k: int | None = None
+
+
 # Base de todas las sentencias
 @dataclass
 class Statement:

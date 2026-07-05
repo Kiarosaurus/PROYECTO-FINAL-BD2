@@ -80,6 +80,11 @@ class _AstBuilder(Transformer):
             max_corner=items[2],
         )
 
+    def match_predicate(self, items):
+        terms = str(items[1])[1:-1]
+        k = int(items[2]) if len(items) > 2 else None
+        return A.MatchCondition(column=str(items[0]), terms=terms, k=k)
+
     def limit_clause(self, items):
         return int(items[0])
 
