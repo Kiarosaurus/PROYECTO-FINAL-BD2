@@ -8,6 +8,7 @@ from core.metrics import IOStats, OperationResult
 from core.ports.buffer import BufferManager
 from core.ports.index import Index
 from indices.inverted.spimi_builder import SPIMIBlockBuilder
+from indices.inverted.text_chunker import DEFAULT_CHUNKER, TextChunker
 from indices.inverted.text_preprocessor import DEFAULT_PREPROCESSOR, TextPreprocessor
 from indices.ports import TextMatchPredicate
 
@@ -23,6 +24,7 @@ class InvertedIndex(Index):
         buffer: BufferManager | None = None,
         file_id: str | None = None,
         preprocessor: TextPreprocessor = DEFAULT_PREPROCESSOR,
+        chunker: TextChunker = DEFAULT_CHUNKER,
     ) -> None:
         if block_document_limit < 1:
             raise ValueError("SPIMI block document limit must be positive")
@@ -31,7 +33,9 @@ class InvertedIndex(Index):
         self.buffer = buffer
         self.file_id = file_id or f"inverted_{column}"
         self.preprocessor = preprocessor
+        self.chunker = chunker
         self._documents: dict[str, Any] = {}
+        self._chunk_parent: dict[str, str] = {}
         self._postings: dict[str, dict[str, int]] = {}
         self._doc_norms: dict[str, float] = {}
         self._last_block_count = 0
@@ -40,11 +44,14 @@ class InvertedIndex(Index):
 
     def build(self, records: Iterable[Any]) -> OperationResult:
         self._documents = {}
+        self._chunk_parent = {}
         documents: list[tuple[str, str]] = []
         for position, record in enumerate(records, start=1):
             doc_id = self._document_id(record, position)
             self._documents[doc_id] = record
-            documents.append((doc_id, self._record_text(record)))
+            for chunk_id, chunk_text in self._chunk_entries(doc_id, self._record_text(record)):
+                self._chunk_parent[chunk_id] = doc_id
+                documents.append((chunk_id, chunk_text))
         builder = SPIMIBlockBuilder(
             block_document_limit=self.block_document_limit,
             preprocessor=self.preprocessor,
@@ -60,12 +67,14 @@ class InvertedIndex(Index):
     def insert(self, key: Any, record: Any) -> OperationResult:
         doc_id = str(key)
         self._documents[doc_id] = record
-        term_counts: dict[str, int] = {}
-        for term in self.preprocessor.tokenize(self._record_text(record)):
-            term_counts[term] = term_counts.get(term, 0) + 1
-        for term, frequency in term_counts.items():
-            postings = self._postings.setdefault(term, {})
-            postings[doc_id] = postings.get(doc_id, 0) + frequency
+        for chunk_id, chunk_text in self._chunk_entries(doc_id, self._record_text(record)):
+            self._chunk_parent[chunk_id] = doc_id
+            term_counts: dict[str, int] = {}
+            for term in self.preprocessor.tokenize(chunk_text):
+                term_counts[term] = term_counts.get(term, 0) + 1
+            for term, frequency in term_counts.items():
+                postings = self._postings.setdefault(term, {})
+                postings[chunk_id] = postings.get(chunk_id, 0) + frequency
         self._compute_document_norms()
         self._persist_snapshot()
         return OperationResult(affected=1, io=self._stats())
@@ -90,8 +99,17 @@ class InvertedIndex(Index):
         if not terms:
             return OperationResult(records=[], io=self._stats())
         limit = k if k is not None else getattr(predicate, "k", None)
-        ranked = self.rank(query, limit)
-        records = [self._documents[doc_id] for doc_id, _score in ranked if doc_id in self._documents]
+        # Cada documento padre sale una sola vez con el score de su mejor chunk
+        seen: set[str] = set()
+        records: list[Any] = []
+        for chunk_id, _score in self.rank(query):
+            parent_id = self._chunk_parent.get(chunk_id, chunk_id)
+            if parent_id in seen or parent_id not in self._documents:
+                continue
+            seen.add(parent_id)
+            records.append(self._documents[parent_id])
+            if limit is not None and len(records) >= limit:
+                break
         return OperationResult(records=records, io=self._stats())
 
     def rank(self, query: str, k: int | None = None) -> list[tuple[str, float]]:
@@ -130,9 +148,17 @@ class InvertedIndex(Index):
         if doc_id not in self._documents:
             return OperationResult(affected=0, io=self._stats())
         self._documents.pop(doc_id)
+        chunk_ids = {
+            chunk_id
+            for chunk_id, parent_id in self._chunk_parent.items()
+            if parent_id == doc_id
+        }
+        for chunk_id in chunk_ids:
+            self._chunk_parent.pop(chunk_id, None)
         empty_terms: list[str] = []
         for term, postings in self._postings.items():
-            postings.pop(doc_id, None)
+            for chunk_id in chunk_ids:
+                postings.pop(chunk_id, None)
             if not postings:
                 empty_terms.append(term)
         for term in empty_terms:
@@ -157,7 +183,7 @@ class InvertedIndex(Index):
         return self._doc_norms.get(str(doc_id), 0.0)
 
     def _compute_document_norms(self) -> None:
-        norm_squares: dict[str, float] = {doc_id: 0.0 for doc_id in self._documents}
+        norm_squares: dict[str, float] = {chunk_id: 0.0 for chunk_id in self._chunk_parent}
         for term, postings in self._postings.items():
             idf = self._idf(term)
             for doc_id, frequency in postings.items():
@@ -169,7 +195,7 @@ class InvertedIndex(Index):
         }
 
     def _idf(self, term: str) -> float:
-        total_docs = max(len(self._documents), 1)
+        total_docs = max(len(self._chunk_parent), 1)
         document_frequency = len(self._postings.get(term, {}))
         return math.log((total_docs + 1) / (document_frequency + 1)) + 1.0
 
@@ -185,14 +211,25 @@ class InvertedIndex(Index):
             return str(record[self.column])
         return str(getattr(record, self.column))
 
+    def _chunk_entries(self, doc_id: str, text: str) -> list[tuple[str, str]]:
+        chunks = self.chunker.split(text)
+        # Con un solo chunk se conserva el id original del documento
+        if len(chunks) == 1:
+            return [(doc_id, chunks[0])]
+        return [
+            (f"{doc_id}#{chunk_no}", chunk_text)
+            for chunk_no, chunk_text in enumerate(chunks)
+        ]
+
     def _persist_snapshot(self) -> None:
         if self.buffer is None:
             return
         posting_pages = self._encode_posting_pages()
         metadata = {
-            "version": 2,
+            "version": 3,
             "column": self.column,
             "documents": self._documents,
+            "chunk_parents": self._chunk_parent,
             "doc_norms": self._doc_norms,
             "last_block_count": self._last_block_count,
             "posting_page_count": len(posting_pages),
@@ -248,6 +285,10 @@ class InvertedIndex(Index):
         if payload.get("column") != self.column:
             return
         self._documents = payload.get("documents", {})
+        # Con snapshots antiguos cada documento cuenta como su propio chunk
+        self._chunk_parent = payload.get("chunk_parents") or {
+            doc_id: doc_id for doc_id in self._documents
+        }
         self._doc_norms = payload.get("doc_norms", {})
         self._last_block_count = payload.get("last_block_count", 0)
         self._posting_page_count = payload.get("posting_page_count", 0)

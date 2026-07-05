@@ -179,6 +179,77 @@ def test_inverted_index_computes_document_norms() -> None:
     assert index.document_norm("missing") == 0.0
 
 
+def test_inverted_index_chunks_multiparagraph_document_and_dedupes_parent() -> None:
+    index = InvertedIndex(column="body", block_document_limit=2)
+    index.build(
+        [
+            {
+                "id": 1,
+                "body": "storage layout basics\n\nvisual search ranking\n\nvisual search quality",
+            },
+            {"id": 2, "body": "audio codecs"},
+            {"id": 3, "body": "visual rendering"},
+        ]
+    )
+
+    result = index.search(TextMatchPredicate(column="body", terms="visual search"))
+    ranked_chunks = [chunk_id for chunk_id, _score in index.rank("visual search")]
+
+    assert [record["id"] for record in result.records] == [1, 3]
+    assert "1#1" in ranked_chunks
+    assert "1#2" in ranked_chunks
+
+
+def test_inverted_index_single_paragraph_keeps_plain_doc_ids() -> None:
+    index = InvertedIndex(column="body", block_document_limit=2)
+    index.build(
+        [
+            {"id": 1, "body": "alpha beta"},
+            {"id": 2, "body": "beta gamma"},
+        ]
+    )
+
+    assert index.postings_for("beta") == {"1": 1, "2": 1}
+    assert index.rank("beta")[0][0] in {"1", "2"}
+
+
+def test_inverted_index_delete_removes_all_chunks_of_document() -> None:
+    index = InvertedIndex(column="body", block_document_limit=2)
+    index.build(
+        [
+            {"id": 1, "body": "alpha beta\n\nalpha gamma\n\ndelta"},
+            {"id": 2, "body": "alpha omega"},
+        ]
+    )
+
+    deleted = index.delete(1)
+    remaining = index.search(TextMatchPredicate(column="body", terms="alpha"))
+
+    assert deleted.affected == 1
+    assert index.postings_for("gamma") == {}
+    assert index.postings_for("delta") == {}
+    assert [record["id"] for record in remaining.records] == [2]
+
+
+def test_inverted_index_snapshot_preserves_chunk_parent_mapping() -> None:
+    storage = MockStorageEngine()
+    buffer = MockBufferManager(storage)
+    index = InvertedIndex(column="body", block_document_limit=2, buffer=buffer)
+    index.build(
+        [
+            {"id": 1, "body": "alpha beta\n\nvisual search"},
+            {"id": 2, "body": "beta gamma"},
+        ]
+    )
+
+    restored = InvertedIndex(column="body", block_document_limit=2, buffer=buffer)
+    result = restored.search(TextMatchPredicate(column="body", terms="visual"))
+
+    assert restored.postings_for("visual") == {"1#1": 1}
+    assert [record["id"] for record in result.records] == [1]
+    assert restored.document_norm("1#1") > 0.0
+
+
 def test_inverted_index_restores_snapshot_from_mock_storage() -> None:
     storage = MockStorageEngine()
     buffer = MockBufferManager(storage)
