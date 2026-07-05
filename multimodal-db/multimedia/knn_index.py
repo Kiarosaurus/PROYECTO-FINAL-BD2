@@ -16,16 +16,21 @@ class MultimediaKNNIndex(Index):
     # Guarda histogramas en memoria indexados por clave
     def __init__(
         self,
-        candidate_ratio: float = 0.5,
+        candidate_ratio: float = 0.01,
         resolver: MediaResolver | None = None,
     ) -> None:
         self._vectors: dict[str, np.ndarray] = {}
         # Lista invertida: visual word -> lista de claves que la contienen
         self._inverted: dict[int, list[str]] = defaultdict(list)
-        # Fracción mínima de candidatos a revisar si el filtro es muy agresivo
+        # Fracción mínima del índice que debe juntar la poda para usarse
         self._candidate_ratio = candidate_ratio
         # Convierte nombres de archivo en histogramas cuando está presente
         self._resolver = resolver
+        # Matriz con todos los vectores apilados para no rearmarla en cada búsqueda
+        self._matrix: np.ndarray | None = None
+        self._norms: np.ndarray | None = None
+        self._keys: list[str] = []
+        self._positions: dict[str, int] = {}
 
     def build(self, records: Iterable[Record]) -> OperationResult:
         # Cada record es una tupla (track_id, histograma)
@@ -67,13 +72,17 @@ class MultimediaKNNIndex(Index):
         if len(self._vectors) == 0:
             return OperationResult(records=[])
         k = k or 10
-        candidates = self._filter_candidates(query)
-        if not candidates:
-            candidates = list(self._vectors.keys())
-        keys = list(candidates)
-        matrix = np.stack([self._vectors[k_] for k_ in keys])
+        self._ensure_matrix()
+        rows = self._candidate_rows(query, k)
+        if rows is None:
+            keys = self._keys
+            matrix = self._matrix
+            norms = self._norms
+        else:
+            keys = [self._keys[i] for i in rows]
+            matrix = self._matrix[rows]
+            norms = self._norms[rows]
         # Similitud coseno entre la consulta y los candidatos
-        norms = np.linalg.norm(matrix, axis=1)
         query_norm = np.linalg.norm(query)
         if query_norm == 0 or np.all(norms == 0):
             return OperationResult(records=[])
@@ -89,6 +98,7 @@ class MultimediaKNNIndex(Index):
         vector = self._vectors.pop(key, None)
         if vector is None:
             return OperationResult(affected=0)
+        self._matrix = None
         # Elimina la clave de las listas invertidas donde aparece
         active_words = np.where(vector > 0)[0]
         for word in active_words:
@@ -105,24 +115,47 @@ class MultimediaKNNIndex(Index):
             return np.asarray(self._resolver.resolve(value), dtype=np.float32)
         return np.asarray(value, dtype=np.float32)
 
+    # Rearma la matriz apilada solo cuando cambió el contenido del índice
+    def _ensure_matrix(self) -> None:
+        if self._matrix is not None:
+            return
+        self._keys = list(self._vectors)
+        self._positions = {key: i for i, key in enumerate(self._keys)}
+        self._matrix = np.stack([self._vectors[key] for key in self._keys])
+        self._norms = np.linalg.norm(self._matrix, axis=1)
+
     def _add_to_index(self, key: str, vector: np.ndarray) -> None:
         self._vectors[key] = vector
+        self._matrix = None
         # Registra la clave en cada visual word activa del histograma
         active_words = np.where(vector > 0)[0]
         for word in active_words:
             self._inverted[int(word)].append(key)
 
-    def _filter_candidates(self, query: np.ndarray) -> set[str]:
-        # Busca las visual words activas en la consulta
-        active_words = np.where(query > 0)[0]
-        candidates: set[str] = set()
-        for word in active_words:
-            candidates.update(self._inverted.get(int(word), []))
-        # Si hay muy pocos candidatos usa todo el índice
-        min_candidates = max(1, int(len(self._vectors) * self._candidate_ratio))
-        if len(candidates) < min_candidates:
-            return set()
-        return candidates
+    # Devuelve las filas candidatas para la búsqueda o None para revisar todo
+    def _candidate_rows(self, query: np.ndarray, k: int) -> np.ndarray | None:
+        total = len(self._keys)
+        # Una word presente en muchos archivos no distingue a ninguno
+        selective_cap = max(1, int(0.05 * total))
+        # Solo las words raras de la consulta aportan a la poda
+        selective_words = [
+            int(word)
+            for word in np.where(query > 0)[0]
+            if 0 < len(self._inverted.get(int(word), [])) <= selective_cap
+        ]
+        if not selective_words:
+            return None
+        # La cantidad de candidatos protege el recall del top k pedido
+        limit = max(k * 4, int(total * self._candidate_ratio))
+        # Si la poda deja demasiados candidatos no vale la pena copiar el subset
+        if limit >= 0.3 * total:
+            return None
+        # Puntaje de cada archivo según cuánto comparte las words raras de la consulta
+        overlap = self._matrix[:, selective_words] @ query[selective_words]
+        # Si pocos archivos comparten esas words se revisa todo el índice
+        if int(np.count_nonzero(overlap)) < limit:
+            return None
+        return np.argpartition(overlap, -limit)[-limit:]
 
     def save(self, sink: StorageEngine) -> None:
         # Serializa histogramas y lista invertida como JSON en una página
@@ -147,3 +180,4 @@ class MultimediaKNNIndex(Index):
             list,
             {int(word): list(keys) for word, keys in state["inverted"].items()},
         )
+        self._matrix = None

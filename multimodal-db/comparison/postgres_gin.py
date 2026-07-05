@@ -13,9 +13,13 @@ class PostgresGINEngine(ComparisonEngine):
     # Conecta al schema compare para búsqueda full-text con GIN
     def __init__(self, dsn: str) -> None:
         self._dsn = dsn
+        self._connection = None
 
+    # Reutiliza una sola conexión para no medir el costo de conectar
     def _conn(self):
-        return psycopg2.connect(self._dsn)
+        if self._connection is None or self._connection.closed:
+            self._connection = psycopg2.connect(self._dsn)
+        return self._connection
 
     def load(self, dataset: list[dict]) -> None:
         # Inserta letras de canciones en la tabla de documentos
@@ -49,9 +53,10 @@ class PostgresGINEngine(ComparisonEngine):
             ORDER BY rank DESC
             LIMIT 10
         """
+        conn = self._conn()
         tracemalloc.start()
         t0 = time.perf_counter()
-        with self._conn() as conn, conn.cursor() as cur:
+        with conn, conn.cursor() as cur:
             cur.execute(sql, (str(q),))
             rows = cur.fetchall()
         latency_ms = (time.perf_counter() - t0) * 1000

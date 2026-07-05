@@ -169,7 +169,7 @@ def bench_pg_knn(vectors: np.ndarray, queries: np.ndarray, dsn: str) -> dict:
 def run_benchmarks(
     sizes: list[int],
     query_count: int = 10,
-    out_dir: str | Path = "experiments/results",
+    out_dir: str | Path = "experiments/results/local",
     seed: int = 42,
     dsn: str | None = None,
     make_plots: bool = True,
@@ -256,7 +256,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark del engine propio contra PostgreSQL")
     parser.add_argument("--sizes", type=int, nargs="+", default=[1000, 10000])
     parser.add_argument("--queries", type=int, default=10)
-    parser.add_argument("--out", default="experiments/results")
+    parser.add_argument("--out", default="experiments/results/local")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--lyrics-csv", default=str(LYRICS_CSV))
     parser.add_argument("--synthetic", action="store_true", help="usa corpus sintético en vez del CSV")
