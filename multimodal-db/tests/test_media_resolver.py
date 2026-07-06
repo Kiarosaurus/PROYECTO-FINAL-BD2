@@ -1,11 +1,35 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import numpy as np
 import pytest
 
+from core.storage.file_engine import FileStorageEngine
 from indices.ports import KnnPredicate
+from multimedia.codebook.kmeans_codebook import KMeansCodebook
 from multimedia.knn_index import MultimediaKNNIndex
-from multimedia.resolver import CompositeMediaResolver
+from multimedia.ports.extractor import FeatureExtractor
+from multimedia.resolver import CompositeMediaResolver, PipelineMediaResolver
 from tests.mocks import MockMediaResolver
+
+
+# Extractor determinista que deriva los descriptores del nombre del archivo
+class _StubExtractor(FeatureExtractor):
+
+    def __init__(self, dim: int = 8) -> None:
+        self._dim = dim
+
+    def extract(self, file_path: str) -> np.ndarray:
+        seed = sum(Path(file_path).name.encode("utf-8"))
+        rng = np.random.default_rng(seed)
+        return rng.random((12, self._dim)).astype(np.float32)
+
+    def feature_dim(self) -> int:
+        return self._dim
+
+    def supported_formats(self) -> list[str]:
+        return [".png"]
 
 
 def test_search_by_file_without_resolver_fails_cleanly() -> None:
@@ -85,6 +109,49 @@ def test_insert_vector_row_uses_first_column_as_key() -> None:
 
     assert inserted.success is True
     assert [key for key, _score in result.records] == ["7"]
+
+
+def test_resolver_persists_codebook_and_skips_refit_on_restart(tmp_path: Path, monkeypatch) -> None:
+    media_dir = tmp_path / "uploads"
+    media_dir.mkdir()
+    for name in ["a.png", "b.png", "c.png"]:
+        (media_dir / name).write_bytes(b"stub")
+    storage = FileStorageEngine(tmp_path / "engine")
+
+    first = PipelineMediaResolver(
+        _StubExtractor(),
+        KMeansCodebook(k=4, random_state=11),
+        media_dir,
+        storage=storage,
+    )
+    before = first.resolve("a.png")
+
+    fresh = KMeansCodebook(k=4, random_state=11)
+
+    def _fail_fit(descriptors) -> None:
+        raise AssertionError("el codebook cargado no debe reentrenarse")
+
+    monkeypatch.setattr(fresh, "fit", _fail_fit)
+    second = PipelineMediaResolver(_StubExtractor(), fresh, media_dir, storage=storage)
+    after = second.resolve("a.png")
+
+    np.testing.assert_array_equal(before, after)
+
+
+def test_resolver_without_storage_keeps_training_in_memory(tmp_path: Path) -> None:
+    media_dir = tmp_path / "uploads"
+    media_dir.mkdir()
+    for name in ["a.png", "b.png"]:
+        (media_dir / name).write_bytes(b"stub")
+
+    resolver = PipelineMediaResolver(
+        _StubExtractor(),
+        KMeansCodebook(k=4, random_state=11),
+        media_dir,
+    )
+    histogram = resolver.resolve("a.png")
+
+    assert histogram.shape == (4,)
 
 
 def test_composite_resolver_routes_by_extension() -> None:

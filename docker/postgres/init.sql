@@ -9,54 +9,9 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 -- Schema engine. Estado durable de nuestro engine multimodal.
 CREATE SCHEMA IF NOT EXISTS engine;
 
--- Una fila por codebook construido con sus parámetros.
-CREATE TABLE IF NOT EXISTS engine.codebook (
-    codebook_id   SERIAL PRIMARY KEY,
-    modality      TEXT    NOT NULL CHECK (modality IN ('TEXT', 'IMAGE', 'AUDIO')),
-    feature_type  TEXT    NOT NULL,
-    k             INTEGER NOT NULL,
-    dim           INTEGER NOT NULL,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- Una fila por codeword o cluster centroid de un codebook.
-CREATE TABLE IF NOT EXISTS engine.codeword (
-    codebook_id   INTEGER NOT NULL REFERENCES engine.codebook(codebook_id) ON DELETE CASCADE,
-    word_id       INTEGER NOT NULL,
-    centroid      vector,
-    idf           REAL    NOT NULL DEFAULT 0,
-    PRIMARY KEY (codebook_id, word_id)
-);
-
--- Histograma por documento.
-CREATE TABLE IF NOT EXISTS engine.histogram (
-    codebook_id   INTEGER NOT NULL REFERENCES engine.codebook(codebook_id) ON DELETE CASCADE,
-    doc_id        BIGINT  NOT NULL,
-    histogram     vector,
-    -- L2 norm cacheada para el cosine scoring
-    norm          REAL    NOT NULL DEFAULT 0,
-    PRIMARY KEY (codebook_id, doc_id)
-);
-
--- Inverted index. Mapea cada codeword a su postings list.
-CREATE TABLE IF NOT EXISTS engine.posting (
-    codebook_id   INTEGER NOT NULL REFERENCES engine.codebook(codebook_id) ON DELETE CASCADE,
-    word_id       INTEGER NOT NULL,
-    doc_id        BIGINT  NOT NULL,
-    weight        REAL    NOT NULL,
-    PRIMARY KEY (codebook_id, word_id, doc_id)
-);
-CREATE INDEX IF NOT EXISTS idx_posting_lookup
-    ON engine.posting (codebook_id, word_id);
-
--- Catalog metadata libre para tablas e índices del engine.
-CREATE TABLE IF NOT EXISTS engine.metadata (
-    key           TEXT PRIMARY KEY,
-    value         JSONB NOT NULL,
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- Paginas genericas del StorageEngine propio cuando corre sobre Postgres.
+-- Toda la persistencia del engine viaja como páginas del StorageEngine.
+-- El codebook, los histogramas del KNN y los snapshots de índices llegan aquí.
+-- Por eso engine.page es la única tabla del schema.
 CREATE TABLE IF NOT EXISTS engine.page (
     file_id       TEXT    NOT NULL,
     page_no       INTEGER NOT NULL,

@@ -128,7 +128,7 @@ CONTRACT_CASES = [
     ),
     IndexContractCase(
         name="knn",
-        factory=lambda buffer=None: MultimediaKNNIndex(),
+        factory=lambda buffer=None: MultimediaKNNIndex(buffer=buffer),
         records=[
             ("1", [1.0, 0.0, 0.0, 0.0]),
             ("2", [1.0, 1.0, 0.0, 0.0]),
@@ -144,7 +144,6 @@ CONTRACT_CASES = [
         delete_key="3",
         deleted_id="3",
         deleted_predicate=KnnPredicate(column="vec", query=[1.0, 0.0, 0.0, 0.0], k=5),
-        supports_restore=False,
     ),
 ]
 

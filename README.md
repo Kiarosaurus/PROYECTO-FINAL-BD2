@@ -202,6 +202,13 @@ ni executor: `FileStorageEngine` (heap files paginados con free-list best-fit en
 `engine.page`, `core/storage/postgres_engine.py`). La variable de entorno
 `STORAGE_BACKEND` elige cuál usa la API.
 
+El estado multimedia sigue el mismo camino: `MultimediaKNNIndex` persiste sus
+histogramas como snapshot paginado vía `BufferManager`, y el codebook de cada
+modalidad se guarda en su propio `file_id` (`codebook_image`, `codebook_audio`)
+a través del mismo puerto. Con `STORAGE_BACKEND=postgres` todo el estado del
+engine (índices, codebooks e histogramas) vive en la tabla `engine.page`, que
+es la única tabla del schema `engine` en `docker/postgres/init.sql`.
+
 ### Formato físico
 
 `FileStorageEngine` guarda cada `file_id` en tres archivos: `{file_id}.heap`
@@ -379,9 +386,23 @@ codebook, calcula IDF, recuantiza y construye el índice KNN.
         return weighted
 ```
 
-El codebook y el índice KNN persisten a través del puerto `StorageEngine`
-(páginas `codebook` y `knn_index`), de modo que con `STORAGE_BACKEND=postgres`
-quedan guardados dentro de PostgreSQL en el schema `engine`.
+El estado multimedia persiste por el mismo camino que el resto de los índices:
+`MultimediaKNNIndex` recibe `buffer` y `file_id` de la fábrica y guarda sus
+histogramas como snapshot paginado (metadata en la página 0 y filas en páginas
+de 4096 bytes) en cada `build`/`insert`/`delete`, recargándolo al construirse.
+El codebook de cada modalidad se persiste tras su primer entrenamiento bajo su
+propio `file_id` (`codebook_image`, `codebook_audio`) y el resolver intenta
+cargarlo al arrancar: con estado previo no se reentrena. Con
+`STORAGE_BACKEND=postgres` todo queda dentro de PostgreSQL en la tabla
+`engine.page`.
+
+Ciclo de vida del codebook: sin estado previo, la primera búsqueda `KNN` o
+`HYBRID` por archivo entrena el codebook con los archivos presentes en
+`uploads/` en ese momento y lo guarda. El corpus de `uploads/` debe estar
+completo antes de esa primera búsqueda: los archivos subidos después no
+participan del entrenamiento. Para reentrenar con un corpus nuevo hay que
+borrar el estado persistido (`engine_data/` con backend `file`, o la tabla
+`engine.page` con backend `postgres`).
 
 ## 7. SQL soportado
 

@@ -7,9 +7,12 @@ from typing import Any, Iterable
 import numpy as np
 
 from core.metrics import IOStats, OperationResult
+from core.ports.buffer import BufferManager
 from core.ports.index import Index, Key, Predicate, Record
 from core.ports.storage import StorageEngine
 from multimedia.ports.resolver import MediaResolver
+
+SNAPSHOT_PAGE_SIZE = 4096
 
 
 class MultimediaKNNIndex(Index):
@@ -18,6 +21,8 @@ class MultimediaKNNIndex(Index):
         self,
         candidate_ratio: float = 0.01,
         resolver: MediaResolver | None = None,
+        buffer: BufferManager | None = None,
+        file_id: str | None = None,
     ) -> None:
         self._vectors: dict[str, np.ndarray] = {}
         # Lista invertida: visual word -> lista de claves que la contienen
@@ -26,15 +31,18 @@ class MultimediaKNNIndex(Index):
         self._candidate_ratio = candidate_ratio
         # Convierte nombres de archivo en histogramas cuando está presente
         self._resolver = resolver
+        # Sin buffer el índice trabaja solo en memoria
+        self.buffer = buffer
+        self.file_id = file_id or "knn_index"
         # Matriz con todos los vectores apilados para no rearmarla en cada búsqueda
         self._matrix: np.ndarray | None = None
         self._norms: np.ndarray | None = None
         self._keys: list[str] = []
         self._positions: dict[str, int] = {}
+        self._load_snapshot(self.buffer)
 
     def build(self, records: Iterable[Record]) -> OperationResult:
         # Cada record es una tupla (track_id, histograma)
-        io = IOStats()
         count = 0
         for key, vector in records:
             try:
@@ -42,7 +50,8 @@ class MultimediaKNNIndex(Index):
             except (TypeError, ValueError) as error:
                 return OperationResult.failure(str(error))
             count += 1
-        return OperationResult(affected=count, io=io)
+        self._persist_snapshot(self.buffer)
+        return OperationResult(affected=count, io=self._stats())
 
     def insert(self, key: Key, record: Record) -> OperationResult:
         # Cuando llega la fila completa el vector sale de la clave
@@ -54,7 +63,8 @@ class MultimediaKNNIndex(Index):
             self._add_to_index(str(key), self._as_vector(value))
         except (TypeError, ValueError) as error:
             return OperationResult.failure(str(error))
-        return OperationResult(affected=1)
+        self._persist_snapshot(self.buffer)
+        return OperationResult(affected=1, io=self._stats())
 
     def search(self, predicate: Predicate, k: int | None = None) -> OperationResult:
         if predicate is None:
@@ -108,7 +118,8 @@ class MultimediaKNNIndex(Index):
             lst = self._inverted.get(int(word), [])
             if key in lst:
                 lst.remove(key)
-        return OperationResult(affected=1)
+        self._persist_snapshot(self.buffer)
+        return OperationResult(affected=1, io=self._stats())
 
     # Convierte el valor recibido en un vector usable
     def _as_vector(self, value: Any) -> np.ndarray:
@@ -161,26 +172,86 @@ class MultimediaKNNIndex(Index):
         return np.argpartition(overlap, -limit)[-limit:]
 
     def save(self, sink: StorageEngine) -> None:
-        # Serializa histogramas y lista invertida como JSON en una página
-        state = {
-            "vectors": {key: vector.tolist() for key, vector in self._vectors.items()},
-            "inverted": {str(word): keys for word, keys in self._inverted.items()},
-        }
-        data = json.dumps(state, separators=(",", ":")).encode("utf-8")
-        sink.write_page("knn_index", 0, data)
+        self._persist_snapshot(self._snapshot_buffer(sink))
 
     def load(self, source: StorageEngine) -> None:
-        # Trae de vuelta histogramas y lista invertida guardados antes
-        data = source.read_page("knn_index", 0)
-        if not data:
+        self._load_snapshot(self._snapshot_buffer(source))
+
+    # Envuelve el storage en un buffer para respetar el camino único de I/O
+    def _snapshot_buffer(self, storage: StorageEngine) -> BufferManager:
+        from core.buffer.lru_buffer import LRUBufferManager
+
+        return LRUBufferManager(storage)
+
+    def _persist_snapshot(self, buffer: BufferManager | None) -> None:
+        if buffer is None:
             return
-        state = json.loads(data.decode("utf-8"))
-        self._vectors = {
-            key: np.asarray(vector, dtype=np.float32)
-            for key, vector in state["vectors"].items()
-        }
-        self._inverted = defaultdict(
-            list,
-            {int(word): list(keys) for word, keys in state["inverted"].items()},
-        )
+        pages = self._encode_vector_pages()
+        metadata = {"version": 1, "vector_page_count": len(pages)}
+        encoded = json.dumps(metadata, separators=(",", ":")).encode("utf-8")
+        self._write_page(buffer, 0, encoded)
+        for page_no, page in enumerate(pages, start=1):
+            self._write_page(buffer, page_no, page)
+        buffer.flush(self.file_id)
+
+    # Cada fila del snapshot lleva una clave con su histograma
+    # Las listas invertidas no se guardan porque se rearman al cargar
+    def _encode_vector_pages(self) -> list[bytes]:
+        rows = [
+            json.dumps(
+                {"key": key, "vector": vector.tolist()},
+                separators=(",", ":"),
+            ).encode("utf-8") + b"\n"
+            for key, vector in self._vectors.items()
+        ]
+        pages: list[bytes] = []
+        current = bytearray()
+        for row in rows:
+            if current and len(current) + len(row) > SNAPSHOT_PAGE_SIZE:
+                pages.append(bytes(current))
+                current = bytearray()
+            if len(row) > SNAPSHOT_PAGE_SIZE:
+                pages.extend(self._split_large_row(row))
+                continue
+            current.extend(row)
+        if current:
+            pages.append(bytes(current))
+        return pages
+
+    def _split_large_row(self, row: bytes) -> list[bytes]:
+        return [
+            row[start:start + SNAPSHOT_PAGE_SIZE]
+            for start in range(0, len(row), SNAPSHOT_PAGE_SIZE)
+        ]
+
+    def _load_snapshot(self, buffer: BufferManager | None) -> None:
+        if buffer is None:
+            return
+        raw = bytes(buffer.get(self.file_id, 0).data)
+        if not raw:
+            return
+        try:
+            metadata = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return
+        stream = bytearray()
+        for page_no in range(1, metadata.get("vector_page_count", 0) + 1):
+            stream.extend(buffer.get(self.file_id, page_no).data)
+        self._vectors = {}
+        self._inverted = defaultdict(list)
         self._matrix = None
+        for line in stream.splitlines():
+            if not line:
+                continue
+            row = json.loads(line.decode("utf-8"))
+            self._add_to_index(row["key"], np.asarray(row["vector"], dtype=np.float32))
+
+    def _write_page(self, buffer: BufferManager, page_no: int, data: bytes) -> None:
+        page = buffer.get(self.file_id, page_no)
+        page.data[:] = data
+        page.dirty = True
+
+    def _stats(self) -> IOStats:
+        if self.buffer is None:
+            return IOStats()
+        return self.buffer.stats()

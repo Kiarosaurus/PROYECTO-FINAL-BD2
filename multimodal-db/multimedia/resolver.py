@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
+from core.ports.storage import StorageEngine
 from multimedia.ports.codebook import Codebook
 from multimedia.ports.extractor import FeatureExtractor
 from multimedia.ports.resolver import MediaResolver
@@ -13,16 +14,30 @@ from multimedia.ports.resolver import MediaResolver
 class PipelineMediaResolver(MediaResolver):
 
     # media_dir es la carpeta donde viven los archivos subidos
+    # Con storage presente el codebook se recupera y se guarda ahí
     def __init__(
         self,
         extractor: FeatureExtractor,
         codebook: Codebook,
         media_dir: str | Path,
+        storage: StorageEngine | None = None,
     ) -> None:
         self._extractor = extractor
         self._codebook = codebook
         self._media_dir = Path(media_dir)
+        self._storage = storage
         self._fitted = False
+        self._restore_codebook()
+
+    # Intenta recuperar un codebook ya entrenado para no repetir el fit
+    def _restore_codebook(self) -> None:
+        if self._storage is None:
+            return
+        loader = getattr(self._codebook, "load", None)
+        if callable(loader):
+            loader(self._storage)
+        if getattr(self._codebook, "is_fitted", False):
+            self._fitted = True
 
     def resolve(self, file_path: str) -> np.ndarray:
         path = self._locate(file_path)
@@ -60,6 +75,9 @@ class PipelineMediaResolver(MediaResolver):
             histograms = [self._codebook.quantize(d) for d in corpus.values()]
             self._codebook.compute_idf(histograms)
         self._fitted = True
+        # El codebook recién entrenado queda guardado para el próximo arranque
+        if self._storage is not None:
+            self._codebook.save(self._storage)
 
     # Junta los descriptores de todos los archivos soportados
     def _corpus_descriptors(self) -> dict[str, np.ndarray]:

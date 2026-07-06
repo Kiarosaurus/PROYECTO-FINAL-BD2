@@ -46,7 +46,8 @@ _ERROR_LABELS = {
 
 
 # Arma el resolver multimedia con las modalidades disponibles
-def _build_media_resolver(media_dir: Path):
+# El storage recibido guarda el codebook de cada modalidad
+def _build_media_resolver(media_dir: Path, storage: StorageEngine):
     try:
         from multimedia.codebook.kmeans_codebook import KMeansCodebook
         from multimedia.resolver import CompositeMediaResolver, PipelineMediaResolver
@@ -57,13 +58,27 @@ def _build_media_resolver(media_dir: Path):
     try:
         from multimedia.extractors.sift_extractor import SIFTExtractor
 
-        resolvers.append(PipelineMediaResolver(SIFTExtractor(), KMeansCodebook(k=32), media_dir))
+        resolvers.append(
+            PipelineMediaResolver(
+                SIFTExtractor(),
+                KMeansCodebook(k=32, file_id="codebook_image"),
+                media_dir,
+                storage=storage,
+            )
+        )
     except ImportError:
         pass
     try:
         from multimedia.extractors.mfcc_extractor import MFCCExtractor
 
-        resolvers.append(PipelineMediaResolver(MFCCExtractor(), KMeansCodebook(k=32), media_dir))
+        resolvers.append(
+            PipelineMediaResolver(
+                MFCCExtractor(),
+                KMeansCodebook(k=32, file_id="codebook_audio"),
+                media_dir,
+                storage=storage,
+            )
+        )
     except ImportError:
         pass
     if not resolvers:
@@ -102,8 +117,10 @@ def create_app() -> FastAPI:
     app.state.upload_dir = upload_dir
     app.state.parser = SqlParser()
     app.state.planner = QueryPlanner()
-    factory = EngineIndexFactory(media_resolver=_build_media_resolver(upload_dir))
-    app.state.executor = QueryExecutor(factory, _build_storage())
+    # Un solo storage compartido por índices y codebooks
+    storage = _build_storage()
+    factory = EngineIndexFactory(media_resolver=_build_media_resolver(upload_dir, storage))
+    app.state.executor = QueryExecutor(factory, storage)
     app.state.catalog = Catalog()
 
     @app.exception_handler(StarletteHTTPException)

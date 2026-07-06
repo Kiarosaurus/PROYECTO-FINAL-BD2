@@ -62,11 +62,15 @@ class EngineIndexFactory(IndexFactory):
         from indices.rtree import RTreeIndex
         from multimedia.knn_index import MultimediaKNNIndex
 
-        if index_type is IndexType.KNN:
-            return MultimediaKNNIndex(resolver=self._media_resolver)
         table, column = self._table_and_column(schema)
         buffer = self._buffer_for(storage)
         file_id = f"{index_type.value}_{table}_{column}"
+        if index_type is IndexType.KNN:
+            return MultimediaKNNIndex(
+                resolver=self._media_resolver,
+                buffer=buffer,
+                file_id=file_id,
+            )
         if index_type is IndexType.BPLUS:
             return BPlusTreeIndex(column=column, buffer=buffer, file_id=file_id)
         if index_type is IndexType.ISAM:

@@ -164,17 +164,63 @@ def test_sql_knn_by_file_uses_media_resolver(tmp_path: Path) -> None:
 
     run("CREATE TABLE media (id INT, feat VECTOR)")
     run("CREATE INDEX ON media (feat) USING knn")
-    run('INSERT INTO media (id, feat) VALUES (1, "a.png"), (2, "b.png"), (3, "c.png")')
+    inserted = run('INSERT INTO media (id, feat) VALUES (1, "a.png"), (2, "b.png"), (3, "c.png")')
     result = run('SELECT * FROM media WHERE KNN(feat, "query.png", 3)')
 
     hits = [record for (record,) in result.rows]
     scores = [score for _key, score in hits]
+    # Con buffer el snapshot del índice llega al storage en cada insert
+    assert inserted.io.disk_writes > 0
     # El filtro de candidatos puede descartar imágenes sin visual words comunes
     assert len(hits) >= 2
     assert hits[0][0] == "a.png"
     assert scores == sorted(scores, reverse=True)
     assert {key for key, _score in hits} <= {"a.png", "b.png", "c.png"}
     assert result.index_type == "knn"
+
+
+def test_sql_knn_index_reloads_snapshot_after_executor_restart(tmp_path: Path) -> None:
+    from tests.mocks import MockMediaResolver
+
+    resolver = MockMediaResolver(
+        table={
+            "q.png": [1.0, 0.0, 0.0],
+            "a.png": [1.0, 0.0, 0.0],
+            "b.png": [0.0, 1.0, 0.0],
+        }
+    )
+    parser, planner = SqlParser(), QueryPlanner()
+
+    def make_run(executor: QueryExecutor):
+        def _run(sql: str):
+            return executor.execute(planner.plan(parser.parse(sql)))
+
+        return _run
+
+    first = make_run(
+        QueryExecutor(
+            EngineIndexFactory(media_resolver=resolver),
+            FileStorageEngine(tmp_path / "storage"),
+        )
+    )
+    first("CREATE TABLE media (id INT, feat VECTOR)")
+    first("CREATE INDEX ON media (feat) USING knn")
+    inserted = first('INSERT INTO media (id, feat) VALUES (1, "a.png"), (2, "b.png")')
+
+    # Un executor nuevo sobre el mismo directorio simula el reinicio del proceso
+    second = make_run(
+        QueryExecutor(
+            EngineIndexFactory(media_resolver=resolver),
+            FileStorageEngine(tmp_path / "storage"),
+        )
+    )
+    second("CREATE TABLE media (id INT, feat VECTOR)")
+    second("CREATE INDEX ON media (feat) USING knn")
+    result = second('SELECT * FROM media WHERE KNN(feat, "q.png", 2)')
+
+    hits = [record for (record,) in result.rows]
+    assert inserted.io.disk_writes > 0
+    assert [key for key, _score in hits] == ["a.png", "b.png"]
 
 
 def _write_sine_wav(path: Path, freq: float) -> None:
