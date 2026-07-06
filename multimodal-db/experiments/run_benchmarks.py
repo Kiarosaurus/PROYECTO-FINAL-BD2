@@ -25,6 +25,11 @@ VECTOR_DIM = 256
 VOCABULARY_SIZE = 500
 WORDS_PER_DOCUMENT = 20
 TOP_K = 10
+# Límite de vocabulario que usan las aplicaciones reales
+DEFAULT_VOCABULARY = 8000
+# Tope de descriptores SIFT usados para entrenar el codebook
+DESCRIPTOR_SAMPLE = 100_000
+IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp")
 
 # Orden fijo de columnas del CSV de resultados
 CSV_COLUMNS = [
@@ -44,6 +49,9 @@ CSV_COLUMNS = [
 
 # Ruta por defecto del CSV de letras descargado de Drive
 LYRICS_CSV = Path(__file__).resolve().parents[2] / "data" / "lyrics" / "lyrics_dataset.csv"
+
+# Ruta por defecto de la carpeta de covers descargados de Drive
+COVERS_DIR = Path(__file__).resolve().parents[2] / "data" / "images"
 
 
 # Genera un vocabulario sintético con palabras que el preprocessor no descarta
@@ -96,6 +104,80 @@ def make_vectors(count: int, rng: np.random.Generator) -> np.ndarray:
     norms = np.linalg.norm(vectors, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     return (vectors / norms).astype(np.float32)
+
+
+# Lista ordenada de imágenes de la carpeta de covers
+def _cover_paths(covers_dir: Path) -> list[Path]:
+    if not covers_dir.is_dir():
+        return []
+    return sorted(
+        path for path in covers_dir.iterdir() if path.suffix.lower() in IMAGE_EXTENSIONS
+    )
+
+
+# Convierte las primeras imágenes válidas en histogramas del codebook
+def _compute_cover_histograms(paths: list[Path], target: int, seed: int) -> np.ndarray | None:
+    from multimedia.codebook.kmeans_codebook import KMeansCodebook
+    from multimedia.extractors.sift_extractor import SIFTExtractor
+
+    extractor = SIFTExtractor()
+    descriptors_list: list[np.ndarray] = []
+    for path in paths:
+        if len(descriptors_list) >= target:
+            break
+        try:
+            descriptors = extractor.extract(str(path))
+        except ValueError:
+            continue
+        if descriptors.shape[0] == 0:
+            continue
+        descriptors_list.append(descriptors)
+    if not descriptors_list:
+        return None
+    stacked = np.vstack(descriptors_list)
+    # El codebook necesita al menos un descriptor por cluster
+    if stacked.shape[0] < VECTOR_DIM:
+        return None
+    sample = stacked
+    if stacked.shape[0] > DESCRIPTOR_SAMPLE:
+        picked = np.random.default_rng(seed).choice(
+            stacked.shape[0], size=DESCRIPTOR_SAMPLE, replace=False
+        )
+        sample = stacked[picked]
+    codebook = KMeansCodebook(k=VECTOR_DIM, random_state=seed)
+    codebook.fit(sample)
+    histograms = [codebook.quantize(descriptors) for descriptors in descriptors_list]
+    # Con el IDF aprendido se recuantiza para aplicar los pesos nuevos
+    codebook.compute_idf(histograms)
+    histograms = [codebook.quantize(descriptors) for descriptors in descriptors_list]
+    return np.vstack(histograms).astype(np.float32)
+
+
+# Histogramas TF-IDF reales de los covers con caché en disco
+# Si los covers no alcanzan se completa con muestreo con reemplazo
+def load_cover_histograms(
+    covers_dir: str | Path,
+    count: int,
+    rng: np.random.Generator,
+    seed: int = 42,
+) -> np.ndarray | None:
+    covers_path = Path(covers_dir)
+    paths = _cover_paths(covers_path)
+    if not paths:
+        return None
+    target = min(count, len(paths))
+    cache_file = covers_path.parent / f"covers_hist_{target}img_k{VECTOR_DIM}.npy"
+    if cache_file.is_file():
+        histograms = np.load(cache_file)
+    else:
+        histograms = _compute_cover_histograms(paths, target, seed)
+        if histograms is None:
+            return None
+        np.save(cache_file, histograms)
+    if histograms.shape[0] < count:
+        extra = rng.integers(0, histograms.shape[0], count - histograms.shape[0])
+        histograms = np.vstack([histograms, histograms[extra]])
+    return histograms.astype(np.float32)
 
 
 def _average_ms(samples: list[float]) -> float:
@@ -189,10 +271,20 @@ def _restore_default_vector_index(dsn: str) -> None:
         conn.commit()
 
 
-def bench_own_text(documents: list[str], queries: list[str], workdir: Path) -> tuple[dict, list[set[str]]]:
+def bench_own_text(
+    documents: list[str],
+    queries: list[str],
+    workdir: Path,
+    vocabulary: int | None = None,
+) -> tuple[dict, list[set[str]]]:
     storage = FileStorageEngine(workdir)
     buffer = LRUBufferManager(storage, capacity=256)
-    index = InvertedIndex(column="body", buffer=buffer, file_id="bench_text")
+    index = InvertedIndex(
+        column="body",
+        buffer=buffer,
+        file_id="bench_text",
+        vocabulary_limit=vocabulary,
+    )
     records = [{"id": i, "body": body} for i, body in enumerate(documents)]
     start = time.perf_counter()
     index.build(records)
@@ -332,12 +424,14 @@ def run_benchmarks(
     dsn: str | None = None,
     make_plots: bool = True,
     lyrics_csv: str | Path | None = None,
+    covers_dir: str | Path | None = None,
+    vocabulary: int | None = None,
 ) -> list[dict]:
     rng = np.random.default_rng(seed)
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
-    vocabulary = _vocabulary()
+    synthetic_words = _vocabulary()
     corpus: list[str] = []
     if lyrics_csv and Path(lyrics_csv).is_file():
         corpus = load_lyrics(Path(lyrics_csv), limit=max(sizes))
@@ -352,14 +446,23 @@ def run_benchmarks(
         else:
             documents = make_documents(size, rng)
             text_queries = [
-                " ".join(rng.choice(vocabulary, size=2))
+                " ".join(rng.choice(synthetic_words, size=2))
                 for _ in range(query_count)
             ]
-        vectors = make_vectors(size, rng)
+        vectors = None
+        if covers_dir is not None:
+            vectors = load_cover_histograms(covers_dir, size, rng, seed=seed)
+            if vectors is None:
+                print(f"sin imágenes válidas en {covers_dir}, se usan vectores sintéticos")
+                covers_dir = None
+        if vectors is None:
+            vectors = make_vectors(size, rng)
         vector_queries = vectors[: min(query_count, len(vectors))]
         truth = exact_knn_ground_truth(vectors, vector_queries, TOP_K)
         with tempfile.TemporaryDirectory() as workdir:
-            text_row, own_text_top = bench_own_text(documents, text_queries, Path(workdir))
+            text_row, own_text_top = bench_own_text(
+                documents, text_queries, Path(workdir), vocabulary=vocabulary
+            )
         rows.append(text_row)
         with tempfile.TemporaryDirectory() as workdir:
             knn_row, own_knn_top = bench_own_knn(vectors, vector_queries, Path(workdir))
@@ -469,13 +572,33 @@ def main() -> None:
     parser.add_argument("--out", default="experiments/results/local")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--lyrics-csv", default=str(LYRICS_CSV))
-    parser.add_argument("--synthetic", action="store_true", help="usa corpus sintético en vez del CSV")
+    parser.add_argument(
+        "--covers-dir",
+        default=str(COVERS_DIR),
+        help="carpeta con covers reales para los histogramas del codebook",
+    )
+    parser.add_argument(
+        "--vocabulary",
+        type=int,
+        default=DEFAULT_VOCABULARY,
+        help="límite top-k del vocabulario del índice de texto, 0 lo desactiva",
+    )
+    parser.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="usa corpus y vectores sintéticos en vez de la data real",
+    )
     args = parser.parse_args()
     dsn = os.environ.get("POSTGRES_DSN")
     lyrics_csv = None if args.synthetic else args.lyrics_csv
     if lyrics_csv and not Path(lyrics_csv).is_file():
         print(f"no se encontró {lyrics_csv}, se usa corpus sintético")
         lyrics_csv = None
+    covers_dir = None if args.synthetic else args.covers_dir
+    if covers_dir and not Path(covers_dir).is_dir():
+        print(f"no se encontró {covers_dir}, se usan vectores sintéticos")
+        covers_dir = None
+    vocabulary = args.vocabulary if args.vocabulary > 0 else None
     rows = run_benchmarks(
         sizes=args.sizes,
         query_count=args.queries,
@@ -483,6 +606,8 @@ def main() -> None:
         seed=args.seed,
         dsn=dsn,
         lyrics_csv=lyrics_csv,
+        covers_dir=covers_dir,
+        vocabulary=vocabulary,
     )
     for row in rows:
         print(
