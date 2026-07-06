@@ -17,17 +17,22 @@ class KMeansCodebook(Codebook):
     # k es el número de grupos (visual words o acoustic words)
     def __init__(self, k: int = 256, random_state: int = 42, file_id: str = "codebook") -> None:
         self._k = k
-        self._kmeans = MiniBatchKMeans(
-            n_clusters=k,
-            random_state=random_state,
-            batch_size=2048,
-            n_init=3,
-        )
+        self._random_state = random_state
+        self._kmeans = self._make_kmeans(k)
         self._fitted = False
         # Cada codebook guarda su estado bajo su propio nombre de archivo
         self.file_id = file_id
         # Peso IDF por cada visual word
         self._idf: np.ndarray = np.ones(k, dtype=np.float32)
+
+    # Arma el modelo de clustering con la cantidad de grupos pedida
+    def _make_kmeans(self, k: int) -> MiniBatchKMeans:
+        return MiniBatchKMeans(
+            n_clusters=k,
+            random_state=self._random_state,
+            batch_size=2048,
+            n_init=3,
+        )
 
     # Dice si el codebook ya aprendió sus centroides
     @property
@@ -35,6 +40,14 @@ class KMeansCodebook(Codebook):
         return self._fitted
 
     def fit(self, descriptors: np.ndarray) -> None:
+        # No puede haber más grupos que descriptores disponibles
+        k = min(self._k, int(descriptors.shape[0]))
+        if k < 1:
+            raise ValueError("no hay descriptores para entrenar el codebook")
+        if k != self._k:
+            self._k = k
+            self._kmeans = self._make_kmeans(k)
+            self._idf = np.ones(k, dtype=np.float32)
         # Aprende los centroides a partir de todos los descriptores
         self._kmeans.fit(descriptors)
         self._fitted = True

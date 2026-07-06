@@ -33,6 +33,8 @@ class QueryExecutor(Executor):
         self._indexes: dict[tuple[str, str], Any] = {}
         # Nombre del tipo de índice creado por tabla y columna
         self._index_types: dict[tuple[str, str], str] = {}
+        # Filas insertadas por tabla para recuperar el registro completo
+        self._table_rows: dict[str, list[dict]] = {}
 
     def execute(self, plan: QueryPlan) -> ResultSet:
         start = time.perf_counter()
@@ -76,6 +78,7 @@ class QueryExecutor(Executor):
 
     def _drop_table(self, plan: QueryPlan) -> ResultSet:
         self._tables.pop(plan.table, None)
+        self._table_rows.pop(plan.table, None)
         for key in [k for k in self._indexes if k[0] == plan.table]:
             del self._indexes[key]
             self._index_types.pop(key, None)
@@ -107,6 +110,7 @@ class QueryExecutor(Executor):
         affected = 0
         for row in plan.rows:
             record = dict(zip(cols, row))
+            self._table_rows.setdefault(plan.table, []).append(record)
             for (table, column), index in self._indexes.items():
                 if table == plan.table and column in record:
                     index.insert(record[column], record)
@@ -158,9 +162,15 @@ class QueryExecutor(Executor):
         text_scores = dict(text)
         table_cols = self._tables.get(plan.table, [])
         wanted = table_cols if plan.columns == ["*"] else list(plan.columns)
+        # Registro completo por clave para llenar los hits que solo vinieron del otro lado
+        base_by_key = {
+            str(record[pred.column]): record
+            for record in self._table_rows.get(plan.table, [])
+            if pred.column in record
+        }
         rows = []
         for key, score in fused:
-            record = records_by_key.get(key)
+            record = records_by_key.get(key) or base_by_key.get(key)
             base = tuple(
                 record.get(col) if record is not None else (key if col == pred.column else None)
                 for col in wanted
