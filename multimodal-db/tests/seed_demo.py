@@ -38,6 +38,9 @@ AUDIO_EXT = (".wav", ".mp3", ".ogg")
 # Frecuencias de los tonos sintéticos del seed
 _SINE_FREQS = (220, 330, 440, 880, 1760, 3520)
 
+# Top de palabras que conservan los índices de texto del seed
+_SEED_VOCABULARY = 50
+
 # Letras cortas para probar la búsqueda de texto
 _SONGS = [
     (1, "Luna de abril", "La luna llena ilumina la noche y el corazón espera en silencio"),
@@ -262,7 +265,10 @@ def _upload_query_copy(client: httpx.Client, paths: list[str], query_name: str) 
 # Crea la tabla de letras con su índice de texto
 def _seed_songs(client: httpx.Client) -> None:
     run_query(client, "CREATE TABLE songs (id INT, title TEXT, lyrics TEXT)")
-    run_query(client, "CREATE INDEX ON songs (lyrics) USING inverted")
+    run_query(
+        client,
+        f"CREATE INDEX ON songs (lyrics) USING inverted WITH (vocabulary = {_SEED_VOCABULARY})",
+    )
     values = ", ".join(f'({i}, "{title}", "{lyrics}")' for i, title, lyrics in _SONGS)
     run_query(client, f"INSERT INTO songs (id, title, lyrics) VALUES {values}")
 
@@ -274,7 +280,10 @@ def _seed_albums(client: httpx.Client, names: list[str]) -> None:
         return
     run_query(client, "CREATE TABLE albums (id INT, cover VECTOR, lyrics TEXT)")
     run_query(client, "CREATE INDEX ON albums (cover) USING knn")
-    run_query(client, "CREATE INDEX ON albums (lyrics) USING inverted")
+    run_query(
+        client,
+        f"CREATE INDEX ON albums (lyrics) USING inverted WITH (vocabulary = {_SEED_VOCABULARY})",
+    )
     values = ", ".join(
         f'({i}, "{name}", "{lyrics}")'
         for i, (name, (_id, _title, lyrics)) in enumerate(zip(names, _SONGS), start=1)

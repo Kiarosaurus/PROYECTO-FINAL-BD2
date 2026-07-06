@@ -2,15 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from typing import Iterator
+
 from core.storage.file_engine import FileStorageEngine
 from ingest.fma_loader import FMALoader
 from ingest.importer import DatasetImporter
+from ingest.ports import DatasetLoader
 from ingest.spotify_loader import SpotifyLoader
 from query.executor import QueryExecutor
 from query.index_factory import EngineIndexFactory
 from query.parser.sql_parser import SqlParser
 from query.planner import QueryPlanner
 from service.catalog import Catalog
+from service.dto import ColumnSpec, IndexInfo
 from service.session import Session
 from tests.test_integration_sql import _write_sine_wav
 
@@ -170,3 +174,62 @@ def test_importer_sanitizes_multiline_and_quoted_text(tmp_path: Path) -> None:
     assert report.rows_inserted == 1
     result = session.execute("SELECT lyrics FROM tracks WHERE id = 1")
     assert result.rows == [("linea uno dice 'hola' y sigue",)]
+
+
+# Corpus mínimo con frecuencias controladas para probar la poda
+class _TinyTextLoader(DatasetLoader):
+
+    def table_name(self) -> str:
+        return "docs"
+
+    def columns(self) -> list[ColumnSpec]:
+        return [ColumnSpec(name="id", type="INT"), ColumnSpec(name="body", type="TEXT")]
+
+    def indexes(self) -> list[IndexInfo]:
+        return [IndexInfo(column="body", index_type="inverted", options={"vocabulary": 2})]
+
+    def rows(self) -> Iterator[tuple]:
+        yield (1, "alpha alpha beta")
+        yield (2, "alpha beta")
+        yield (3, "gamma delta gamma")
+
+
+class _RecordingSession:
+
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    def execute(self, sql: str):
+        self.statements.append(sql)
+
+
+def test_importer_serializes_index_options_as_with_clause() -> None:
+    session = _RecordingSession()
+
+    DatasetImporter(session).run(_TinyTextLoader())
+
+    assert (
+        "CREATE INDEX ON docs (body) USING inverted WITH (vocabulary = 2)"
+        in session.statements
+    )
+
+
+def test_importer_vocabulary_option_prunes_rare_terms(tmp_path: Path) -> None:
+    session = _make_session(tmp_path / "storage")
+
+    report = DatasetImporter(session).run(_TinyTextLoader())
+
+    assert report.rows_inserted == 3
+    frequent = session.execute('SELECT id FROM docs WHERE MATCH(body, "alpha", 3)')
+    rare = session.execute('SELECT id FROM docs WHERE MATCH(body, "delta", 3)')
+    assert {row[0] for row in frequent.rows} == {1, 2}
+    assert rare.rows == []
+
+
+def test_spotify_loader_declares_lyrics_vocabulary() -> None:
+    loader = SpotifyLoader("features.csv", "lyrics.csv")
+
+    inverted = [ix for ix in loader.indexes() if ix.index_type == "inverted"]
+
+    assert len(inverted) == 1
+    assert inverted[0].options == {"vocabulary": 8000}

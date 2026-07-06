@@ -354,6 +354,15 @@ ventana (100 palabras por defecto), un fallback lo corta en ventanas
 consecutivas de ese tamaño sin solapamiento. La búsqueda devuelve cada
 documento padre una sola vez con el score de su mejor chunk.
 
+El codebook textual de las aplicaciones se limita a las k palabras más
+frecuentes vía `CREATE INDEX ... WITH (vocabulary = k)`: el importador de
+Spotify usa k=8000, elegido midiendo con el preprocessor real la cobertura
+acumulada de ocurrencias sobre las letras del corpus (k=5000 cubre 92.7 %,
+k=8000 cubre 95.1 %, k=10000 cubre 96.0 %); 8000 es el menor múltiplo de 1000
+que supera el 95 %. Con eso las aplicaciones dejan el vocabulario completo
+(71725 términos) y pasan al top-k que define la especificación. Un
+`CREATE INDEX` sin `WITH` mantiene el vocabulario completo.
+
 ### MultimediaKNN
 
 Guarda un histograma por objeto y una inverted list por visual word. La búsqueda

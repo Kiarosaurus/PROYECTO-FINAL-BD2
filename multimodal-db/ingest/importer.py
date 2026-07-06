@@ -40,6 +40,7 @@ class DatasetImporter:
         for index in loader.indexes():
             self._session.execute(
                 f"CREATE INDEX ON {table} ({index.column}) USING {index.index_type}"
+                + self._format_options(index.options)
             )
             report.indexes.append(f"{index.column}:{index.index_type}")
         names = ", ".join(col.name for col in columns)
@@ -60,6 +61,15 @@ class DatasetImporter:
         report.rows_inserted += len(batch)
         report.batches += 1
         batch.clear()
+
+    # Escribe las opciones del índice como cláusula WITH
+    def _format_options(self, options: dict) -> str:
+        if not options:
+            return ""
+        parts = ", ".join(
+            f"{name} = {self._format_value(value)}" for name, value in options.items()
+        )
+        return f" WITH ({parts})"
 
     def _format_row(self, row: tuple) -> str:
         return "(" + ", ".join(self._format_value(value) for value in row) + ")"
