@@ -14,7 +14,11 @@ TYPE: "INT"i | "FLOAT"i | "TEXT"i | "VARCHAR"i | "VECTOR"i | "BOOL"i
 
 drop_table: "DROP"i "TABLE"i NAME
 
-create_index: "CREATE"i "INDEX"i "ON"i NAME "(" NAME ")" "USING"i NAME
+create_index: "CREATE"i "INDEX"i "ON"i NAME "(" NAME ")" "USING"i NAME with_options?
+
+// Ajustes opcionales del índice como pares clave valor
+with_options: "WITH"i "(" option_pair ("," option_pair)* ")"
+option_pair: NAME "=" value
 
 insert: "INSERT"i "INTO"i NAME column_list? "VALUES"i row ("," row)*
 column_list: "(" NAME ("," NAME)* ")"

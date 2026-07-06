@@ -43,6 +43,8 @@ class InvertedIndex(Index):
         self._postings: dict[str, dict[str, int]] = {}
         self._doc_norms: dict[str, float] = {}
         self._vocabulary: frozenset[str] | None = None
+        # Palabras visibles cuando el índice crece solo con inserciones
+        self._dynamic_vocabulary: frozenset[str] | None = None
         self._last_block_count = 0
         self._posting_page_count = 0
         self._load_snapshot()
@@ -84,6 +86,7 @@ class InvertedIndex(Index):
                     continue
                 postings = self._postings.setdefault(term, {})
                 postings[chunk_id] = postings.get(chunk_id, 0) + frequency
+        self._refresh_dynamic_vocabulary()
         self._compute_document_norms()
         self._persist_snapshot()
         return OperationResult(affected=1, io=self._stats())
@@ -129,9 +132,12 @@ class InvertedIndex(Index):
             query_tf[term] = query_tf.get(term, 0) + 1
         if not query_tf:
             return []
+        visible = self._visible_terms()
         query_weights: dict[str, float] = {}
         for term, frequency in query_tf.items():
             if term not in self._postings:
+                continue
+            if visible is not None and term not in visible:
                 continue
             query_weights[term] = frequency * self._idf(term)
         query_norm = math.sqrt(sum(weight * weight for weight in query_weights.values()))
@@ -174,6 +180,7 @@ class InvertedIndex(Index):
                 empty_terms.append(term)
         for term in empty_terms:
             self._postings.pop(term, None)
+        self._refresh_dynamic_vocabulary()
         self._compute_document_norms()
         self._persist_snapshot()
         return OperationResult(affected=1, io=self._stats())
@@ -181,6 +188,9 @@ class InvertedIndex(Index):
     def postings_for(self, term: str) -> dict[str, int]:
         tokens = self.preprocessor.tokenize(term)
         if not tokens:
+            return {}
+        visible = self._visible_terms()
+        if visible is not None and tokens[0] not in visible:
             return {}
         return dict(self._postings.get(tokens[0], {}))
 
@@ -196,6 +206,7 @@ class InvertedIndex(Index):
     # Conserva solo las palabras más frecuentes de toda la colección
     # Los empates de frecuencia se resuelven por orden alfabético
     def _apply_vocabulary_limit(self) -> None:
+        self._dynamic_vocabulary = None
         if self.vocabulary_limit is None:
             self._vocabulary = None
             return
@@ -206,9 +217,32 @@ class InvertedIndex(Index):
         self._postings = dict(ranked[: self.vocabulary_limit])
         self._vocabulary = frozenset(self._postings)
 
+    # Recalcula las palabras más frecuentes cuando el diccionario no quedó congelado
+    # Los conteos completos se conservan para que una palabra podada pueda volver
+    def _refresh_dynamic_vocabulary(self) -> None:
+        if self.vocabulary_limit is None or self._vocabulary is not None:
+            self._dynamic_vocabulary = None
+            return
+        ranked = sorted(
+            self._postings.items(),
+            key=lambda item: (-sum(item[1].values()), item[0]),
+        )
+        self._dynamic_vocabulary = frozenset(
+            term for term, _postings in ranked[: self.vocabulary_limit]
+        )
+
+    # Palabras que las consultas pueden ver según el límite configurado
+    def _visible_terms(self) -> frozenset[str] | None:
+        if self._vocabulary is not None:
+            return self._vocabulary
+        return self._dynamic_vocabulary
+
     def _compute_document_norms(self) -> None:
         norm_squares: dict[str, float] = {chunk_id: 0.0 for chunk_id in self._chunk_parent}
+        visible = self._visible_terms()
         for term, postings in self._postings.items():
+            if visible is not None and term not in visible:
+                continue
             idf = self._idf(term)
             for doc_id, frequency in postings.items():
                 weight = frequency * idf
@@ -324,6 +358,7 @@ class InvertedIndex(Index):
             self._postings = payload.get("postings", {})
         else:
             self._postings = self._read_posting_pages(self._posting_page_count)
+        self._refresh_dynamic_vocabulary()
         if not self._doc_norms:
             self._compute_document_norms()
 

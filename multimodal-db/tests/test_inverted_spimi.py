@@ -388,6 +388,35 @@ def test_inverted_index_vocabulary_limit_survives_snapshot_restore() -> None:
     assert restored.postings_for("alpha") == {"1": 2, "2": 1, "4": 1}
 
 
+def test_inverted_index_vocabulary_limit_applies_on_insert_only_index() -> None:
+    index = InvertedIndex(column="body", block_document_limit=2, vocabulary_limit=2)
+
+    index.insert(1, {"id": 1, "body": "alpha alpha beta"})
+    index.insert(2, {"id": 2, "body": "alpha beta"})
+    index.insert(3, {"id": 3, "body": "gamma delta gamma"})
+
+    pruned = index.search(TextMatchPredicate(column="body", terms="gamma"))
+    kept = index.search(TextMatchPredicate(column="body", terms="alpha"))
+
+    assert index.postings_for("gamma") == {}
+    assert pruned.records == []
+    assert {record["id"] for record in kept.records} == {1, 2}
+
+
+def test_inverted_index_dynamic_vocabulary_lets_pruned_term_return_with_full_counts() -> None:
+    index = InvertedIndex(column="body", block_document_limit=2, vocabulary_limit=2)
+    index.insert(1, {"id": 1, "body": "alpha alpha beta"})
+    index.insert(2, {"id": 2, "body": "alpha beta"})
+    index.insert(3, {"id": 3, "body": "gamma delta gamma"})
+
+    index.insert(4, {"id": 4, "body": "gamma gamma gamma"})
+
+    # Con cinco apariciones gamma desplaza a beta
+    # Los conteos previos de gamma se conservan
+    assert index.postings_for("gamma") == {"3": 2, "4": 3}
+    assert index.postings_for("beta") == {}
+
+
 def test_engine_index_factory_passes_vocabulary_limit_to_inverted_index() -> None:
     factory = EngineIndexFactory()
 

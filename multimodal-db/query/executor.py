@@ -88,10 +88,19 @@ class QueryExecutor(Executor):
             "column": plan.columns[0],
             "columns": self._tables.get(plan.table, []),
         }
+        vocabulary = plan.index_options.get("vocabulary")
+        if vocabulary is not None:
+            schema["vocabulary_limit"] = self._positive_int(vocabulary, "vocabulary")
         index = self._factory.create(index_type, schema, self._storage)
         self._indexes[(plan.table, plan.columns[0])] = index
         self._index_types[(plan.table, plan.columns[0])] = index_type.value
         return ResultSet()
+
+    # Valida que la opción del índice sea un entero mayor que cero
+    def _positive_int(self, value: Any, name: str) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(f"la opción {name} requiere un entero positivo, se recibió {value!r}")
+        return value
 
     def _insert(self, plan: QueryPlan) -> ResultSet:
         cols = plan.columns or self._tables.get(plan.table, [])

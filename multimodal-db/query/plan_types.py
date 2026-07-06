@@ -34,6 +34,8 @@ class QueryPlan:
     k: int | None = None
     # Tipo de índice a crear
     index_type: str | None = None
+    # Ajustes extra para el índice a crear
+    index_options: dict = field(default_factory=dict)
 
 
 # Resultado que sale del executor

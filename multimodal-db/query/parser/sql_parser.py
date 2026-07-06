@@ -23,11 +23,19 @@ class _AstBuilder(Transformer):
         return A.DropTable(table=str(items[0]))
 
     def create_index(self, items):
+        options = items[3] if len(items) > 3 else {}
         return A.CreateIndex(
             table=str(items[0]),
             column=str(items[1]),
             index_type=str(items[2]),
+            options=options,
         )
+
+    def with_options(self, items):
+        return dict(items)
+
+    def option_pair(self, items):
+        return (str(items[0]), items[1])
 
     def column_list(self, items):
         return [str(name) for name in items]

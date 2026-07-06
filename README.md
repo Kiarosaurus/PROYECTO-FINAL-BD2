@@ -415,6 +415,15 @@ SELECT * FROM img WHERE WITHIN(box, [0, 0], [10, 10])
 Tipos de índice aceptados en `CREATE INDEX ... USING`: `bplus`, `isam`, `hash`,
 `rtree`, `inverted`, `knn`.
 
+`CREATE INDEX` acepta una cláusula opcional `WITH (clave = valor, ...)` para
+configurar el índice. El índice `inverted` entiende `vocabulary`, un entero
+positivo que limita el diccionario a las k palabras más frecuentes de la
+colección (los términos fuera del top-k no se indexan para búsqueda):
+
+```sql
+CREATE INDEX ON songs (lyrics) USING inverted WITH (vocabulary = 500)
+```
+
 ## 8. Query plan
 
 Cada respuesta de `POST /query` incluye el plan ejecutado como líneas con

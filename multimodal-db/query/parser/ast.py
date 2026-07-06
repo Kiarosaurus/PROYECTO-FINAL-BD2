@@ -86,6 +86,7 @@ class CreateIndex(Statement):
     table: str
     column: str
     index_type: str
+    options: dict = field(default_factory=dict)
 
 
 # Mete filas en una tabla

@@ -108,6 +108,7 @@ class QueryPlanner(Planner):
                 table=ast.table,
                 columns=[ast.column],
                 index_type=ast.index_type,
+                index_options=dict(ast.options),
             )
         if isinstance(ast, A.Insert):
             return QueryPlan(

@@ -105,6 +105,34 @@ def test_sql_text_match_ranks_documents_by_relevance(tmp_path: Path) -> None:
     assert result.predicate_kind == "text_match"
 
 
+def test_sql_create_index_with_vocabulary_prunes_rare_terms(tmp_path: Path) -> None:
+    executor = QueryExecutor(EngineIndexFactory(), FileStorageEngine(tmp_path))
+    session = Session(SqlParser(), QueryPlanner(), executor, Catalog())
+
+    session.execute("CREATE TABLE docs (id INT, body TEXT)")
+    session.execute("CREATE INDEX ON docs (body) USING inverted WITH (vocabulary = 2)")
+    session.execute(
+        'INSERT INTO docs (id, body) VALUES '
+        '(1, "alpha alpha beta"), '
+        '(2, "alpha beta"), '
+        '(3, "gamma delta gamma")'
+    )
+    pruned = session.execute('SELECT id FROM docs WHERE MATCH(body, "gamma", 3)')
+    kept = session.execute('SELECT id FROM docs WHERE MATCH(body, "alpha", 3)')
+
+    # Solo alpha y beta sobreviven al límite de vocabulario
+    assert pruned.rows == []
+    assert {row[0] for row in kept.rows} == {1, 2}
+
+
+@pytest.mark.parametrize("value", ['0', '-3', '2.5', '"abc"'])
+def test_sql_create_index_with_invalid_vocabulary_raises(run, value) -> None:
+    run("CREATE TABLE docs (id INT, body TEXT)")
+
+    with pytest.raises(ValueError, match="vocabulary"):
+        run(f"CREATE INDEX ON docs (body) USING inverted WITH (vocabulary = {value})")
+
+
 def _write_noise_image(path: Path, seed: int) -> None:
     rng = np.random.default_rng(seed)
     image = rng.integers(0, 255, size=(64, 64), dtype=np.uint8)

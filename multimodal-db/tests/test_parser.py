@@ -29,6 +29,23 @@ def test_create_index(parser):
     assert (stmt.table, stmt.column, stmt.index_type) == ("img", "feat", "rtree")
 
 
+def test_create_index_without_with_has_empty_options(parser):
+    stmt = parser.parse("CREATE INDEX ON img (feat) USING rtree")
+    assert stmt.options == {}
+
+
+def test_create_index_with_options(parser):
+    stmt = parser.parse("CREATE INDEX ON docs (body) USING inverted WITH (vocabulary = 500)")
+    assert isinstance(stmt, A.CreateIndex)
+    assert (stmt.table, stmt.column, stmt.index_type) == ("docs", "body", "inverted")
+    assert stmt.options == {"vocabulary": 500}
+
+
+def test_create_index_with_multiple_options(parser):
+    stmt = parser.parse('CREATE INDEX ON docs (body) USING inverted WITH (vocabulary = 10, mode = "fast")')
+    assert stmt.options == {"vocabulary": 10, "mode": "fast"}
+
+
 def test_insert_multiple_rows(parser):
     stmt = parser.parse('INSERT INTO img (id, path) VALUES (1, "a.jpg"), (2, "b.jpg")')
     assert isinstance(stmt, A.Insert)

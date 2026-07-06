@@ -38,6 +38,14 @@ def test_create_index(plan):
     assert q.op is PlanOp.CREATE_INDEX
     assert q.columns == ["feat"]
     assert q.index_type == "rtree"
+    assert q.index_options == {}
+
+
+def test_create_index_with_options_carries_index_options(plan):
+    q = plan("CREATE INDEX ON docs (body) USING inverted WITH (vocabulary = 500)")
+    assert q.op is PlanOp.CREATE_INDEX
+    assert q.index_type == "inverted"
+    assert q.index_options == {"vocabulary": 500}
 
 
 def test_insert(plan):
