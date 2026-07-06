@@ -75,7 +75,7 @@ def _build_media_resolver(media_dir: Path, storage: StorageEngine):
 
         resolvers.append(
             PipelineMediaResolver(
-                MFCCExtractor(),
+                MFCCExtractor(sample_rate=8000),
                 KMeansCodebook(k=32, file_id="codebook_audio"),
                 media_dir,
                 storage=storage,
