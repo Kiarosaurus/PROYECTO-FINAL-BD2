@@ -33,7 +33,8 @@ services:
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app
       # Elige dónde se guardan los datos, en archivos o en postgres
-      STORAGE_BACKEND: ${STORAGE_BACKEND:-file}
+      # Por defecto usa postgres y así el estado sobrevive a los reinicios
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-postgres}
       POSTGRES_DSN: postgresql://${POSTGRES_USER:-mmdb}:${POSTGRES_PASSWORD:-mmdb}@postgres:5432/${POSTGRES_DB:-multimodal}
     ports:
       - "8000:8000"

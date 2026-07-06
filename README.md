@@ -611,8 +611,14 @@ Quedan expuestos:
 - Postgres: `localhost:5432`
 
 Variables opcionales (con sus valores por defecto):
-- `STORAGE_BACKEND=file`: elige el `StorageEngine` (`file` o `postgres`).
+- `STORAGE_BACKEND=postgres`: elige el `StorageEngine` (`postgres` o `file`
+  como alternativa liviana sin base de datos).
 - `POSTGRES_USER=mmdb`, `POSTGRES_PASSWORD=mmdb`, `POSTGRES_DB=multimodal`.
+
+Con el default `postgres` la corrida estándar demuestra la persistencia que
+pide la especificación: el motor guarda sus páginas y su catálogo en el schema
+`engine` de PostgreSQL, así que el estado sobrevive reinicios del backend
+(`docker compose restart backend`).
 
 Para apagar todo:
 
