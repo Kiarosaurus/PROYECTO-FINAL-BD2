@@ -24,9 +24,9 @@ propias que operan sobre páginas administradas por un `BufferManager` central, 
 el sistema se compara experimentalmente contra los índices nativos de PostgreSQL
 (GIN para texto, pgvector IVFFlat/HNSW para vectores).
 
-### Planificacion y seguimiento
+### Planificación y seguimiento
 
-El avance del proyecto se organizo por hitos en GitHub Projects y ramas de
+El avance del proyecto se organizó por hitos en GitHub Projects y ramas de
 trabajo. El siguiente diagrama resume las etapas ya completadas y el cierre
 pendiente para la entrega.
 
@@ -36,25 +36,25 @@ gantt
     dateFormat  YYYY-MM-DD
     axisFormat  %d/%m
 
-    section Planificacion y arquitectura
-    Analisis del enunciado y alcance              :done, m1, 2026-06-24, 2026-06-25
+    section Planificación y arquitectura
+    Análisis del enunciado y alcance              :done, m1, 2026-06-24, 2026-06-25
     Contratos base, storage y BufferManager       :done, m2, 2026-06-25, 2026-06-27
 
-    section Indices de datos
+    section Índices de datos
     B+Tree, ISAM y Hash extendible                :done, i1, 2026-06-27, 2026-06-30
-    R-Tree con busqueda por rango y KNN           :done, i2, 2026-06-30, 2026-07-01
-    Indice invertido SPIMI y ranking TF-IDF       :done, i3, 2026-07-01, 2026-07-03
+    R-Tree con búsqueda por rango y KNN           :done, i2, 2026-06-30, 2026-07-01
+    Índice invertido SPIMI y ranking TF-IDF       :done, i3, 2026-07-01, 2026-07-03
 
     section Motor multimodal
-    Extraccion de features de imagen y audio      :done, q1, 2026-07-01, 2026-07-03
-    Parser SQL, planner y ejecucion de consultas  :done, q2, 2026-07-03, 2026-07-04
-    API, interfaz y flujo de busqueda             :done, q3, 2026-07-04, 2026-07-05
+    Extracción de features de imagen y audio      :done, q1, 2026-07-01, 2026-07-03
+    Parser SQL, planner y ejecución de consultas  :done, q2, 2026-07-03, 2026-07-04
+    API, interfaz y flujo de búsqueda             :done, q3, 2026-07-04, 2026-07-05
 
-    section Validacion y entrega
-    Pruebas unitarias e integracion               :done, v1, 2026-07-03, 2026-07-05
-    Documentacion tecnica y README                :done, v2, 2026-07-05, 2026-07-06
-    Revision final y preparacion de demo          :active, v3, 2026-07-06, 2026-07-08
-    Presentacion y cierre                         :v4, 2026-07-08, 2026-07-09
+    section Validación y entrega
+    Pruebas unitarias e integración               :done, v1, 2026-07-03, 2026-07-05
+    Documentación técnica y README                :done, v2, 2026-07-05, 2026-07-06
+    Revisión final y preparación de demo          :active, v3, 2026-07-06, 2026-07-08
+    Presentación y cierre                         :v4, 2026-07-08, 2026-07-09
 ```
 
 ## 2. Requisitos
