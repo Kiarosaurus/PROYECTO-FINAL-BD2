@@ -100,9 +100,9 @@ Lo único aspiracional se marca como pendiente.
   páginas de 4096 bytes, así que el build de texto no exige el corpus completo
   en memoria.
 - **Latencia (medida en la corrida real de benchmarks):** el texto propio
-  pasa de 0.24 ms por consulta (N=1000) a 34.9 ms (N=100000) y el KNN propio
-  de 0.14 ms a 47.0 ms. En la misma carga de 100K, IVFFlat responde en 2.7 ms
-  y HNSW en 4.1 ms. La corrida de 100K chunks está registrada con sus tablas
+  pasa de 0.29 ms por consulta (N=1000) a 68.0 ms (N=100000) y el KNN propio
+  de 0.16 ms a 8.3 ms. En la misma carga de 100K, IVFFlat responde en 1.5 ms
+  y HNSW en 1.3 ms. La corrida de 100K chunks está registrada con sus tablas
   y plots en la sección de experimentos.
 - **Portabilidad:** `STORAGE_BACKEND=file|postgres` cambia la persistencia sin
   tocar índices ni executor.
@@ -817,11 +817,22 @@ corpus real tiene 18194 letras (sin saltos de párrafo dobles: el fallback del
 chunker las corta en ventanas de 100 palabras y una letra larga aporta varios
 chunks), así que para la carga de 100K el benchmark completa
 los documentos faltantes con muestreo con reemplazo sobre las mismas letras
-reales, cada copia con id propio. Con `--synthetic`, o si el CSV no existe,
-cae al corpus sintético determinista (seed fija): documentos de 20 palabras
-sobre un vocabulario de 500 términos. Los vectores son dispersos de 256
-dimensiones normalizados (misma dimensión que la columna `vector(256)` de
-`compare.media`).
+reales, cada copia con id propio. El inverted index propio se mide con
+`--vocabulary` en su valor por defecto (8000, el top-k elegido por cobertura
+en la sección 5), la misma configuración que usan las aplicaciones.
+
+Los vectores salen de los covers reales de `data/images`: descriptores SIFT
+de las primeras M imágenes válidas (M = min(N, 17706 disponibles)), un
+codebook K-Means de k=256 visual words entrenado con una muestra de hasta
+100000 descriptores con seed fija, y el histograma TF-IDF normalizado L2 de
+cada imagen, la misma dimensión que la columna `vector(256)` de
+`compare.media`. Los histogramas se cachean en un `.npy` bajo `data/` (clave
+por cantidad de imágenes y k) para no recomputar SIFT en cada corrida. Para
+la carga de 100K, igual que en texto, los 17706 histogramas reales se
+amplifican por muestreo con reemplazo hasta N. Con `--synthetic`, o si faltan
+el CSV o los covers, cae al camino sintético determinista (seed fija):
+documentos de 20 palabras sobre un vocabulario de 500 términos y vectores
+dispersos de 256 dimensiones normalizados.
 
 Para cada tamaño de carga mide tiempo de build, latencia promedio, throughput,
 recall@10 contra el scan lineal exacto, overlap textual contra GIN, pico de
@@ -852,34 +863,37 @@ POSTGRES_DSN="dbname=multimodal user=mmdb password=mmdb host=localhost" \
 
 ### Resultados (corrida real contra el stack de Docker)
 
-Corrida con `--sizes 1000 10000 100000 --queries 20`. `recall@10` se mide
-contra el scan lineal exacto y `overlap@10` es el Jaccard del top-10 propio
-contra GIN, según las definiciones de la sección de métricas. `RSS` es el
-pico del proceso completo del benchmark, por eso las dos filas propias del
-mismo N comparten valor. `n/a` significa que la métrica no aplica a ese engine.
+Corrida con `--sizes 1000 10000 100000 --queries 20` sobre letras y covers
+reales (17706 covers, amplificados por muestreo con reemplazo para 100K).
+`recall@10` se mide contra el scan lineal exacto y `overlap@10` es el Jaccard
+del top-10 propio contra GIN, según las definiciones de la sección de
+métricas. `RSS` es el pico del proceso completo del benchmark, incluida la
+preparación de los histogramas reales (SIFT y codebook), por eso las dos
+filas propias del mismo N comparten valor. `n/a` significa que la métrica no
+aplica a ese engine.
 
 | Modalidad | Engine | N | build (s) | query prom. (ms) | qps | recall@10 | overlap@10 | disk_reads | disk_writes | RSS (MB) | índice PG (MB) |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| texto | own-inverted | 1000 | 2.891 | 0.236 | 4171.39 | n/a | 0.309 | 1173 | 801 | 210.0 | n/a |
-| vector | own-knn | 1000 | 0.008 | 0.139 | 7072.44 | 1.000 | n/a | 0 | 0 | 210.0 | n/a |
-| texto | pg-gin | 1000 | 0.813 | 1.490 | 658.08 | n/a | n/a | n/a | n/a | n/a | 1.33 |
-| vector | pg-ivfflat | 1000 | 0.190 | 0.866 | 1019.57 | 0.200 | n/a | n/a | n/a | n/a | 1.62 |
-| vector | pg-hnsw | 1000 | 0.338 | 1.007 | 905.05 | 0.995 | n/a | n/a | n/a | n/a | 1.31 |
-| texto | own-inverted | 10000 | 29.628 | 4.020 | 248.34 | n/a | 0.067 | 12834 | 8041 | 385.2 | n/a |
-| vector | own-knn | 10000 | 0.076 | 3.372 | 296.08 | 1.000 | n/a | 0 | 0 | 385.2 | n/a |
-| texto | pg-gin | 10000 | 8.821 | 4.169 | 238.00 | n/a | n/a | n/a | n/a | n/a | 7.42 |
-| vector | pg-ivfflat | 10000 | 2.443 | 0.855 | 1034.72 | 0.225 | n/a | n/a | n/a | n/a | 11.62 |
-| vector | pg-hnsw | 10000 | 5.802 | 1.419 | 654.67 | 0.970 | n/a | n/a | n/a | n/a | 13.03 |
+| texto | own-inverted | 1000 | 2.845 | 0.287 | 3443.25 | n/a | 0.194 | 2405 | 1539 | 789.9 | n/a |
+| vector | own-knn | 1000 | 0.279 | 0.163 | 6070.19 | 0.965 | n/a | 981 | 981 | 789.9 | n/a |
+| texto | pg-gin | 1000 | 0.716 | 0.929 | 1061.46 | n/a | n/a | n/a | n/a | n/a | 1.33 |
+| vector | pg-ivfflat | 1000 | 0.180 | 0.843 | 1086.10 | 0.420 | n/a | n/a | n/a | n/a | 1.57 |
+| vector | pg-hnsw | 1000 | 0.507 | 0.900 | 972.64 | 0.985 | n/a | n/a | n/a | n/a | 1.28 |
+| texto | own-inverted | 10000 | 27.605 | 5.868 | 170.28 | n/a | 0.096 | 25131 | 15557 | 2409.9 | n/a |
+| vector | own-knn | 10000 | 2.482 | 0.564 | 1768.72 | 0.995 | n/a | 9808 | 9808 | 2409.9 | n/a |
+| texto | pg-gin | 10000 | 7.270 | 2.562 | 388.58 | n/a | n/a | n/a | n/a | n/a | 7.43 |
+| vector | pg-ivfflat | 10000 | 2.296 | 0.971 | 860.84 | 0.585 | n/a | n/a | n/a | n/a | 11.61 |
+| vector | pg-hnsw | 10000 | 2.894 | 1.175 | 697.67 | 0.980 | n/a | n/a | n/a | n/a | 10.91 |
 
 #### Carga de 100K chunks
 
 | Modalidad | Engine | N | build (s) | query prom. (ms) | qps | recall@10 | overlap@10 | disk_reads | disk_writes | RSS (MB) | índice PG (MB) |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| texto | own-inverted | 100000 | 310.699 | 34.900 | 28.64 | n/a | 0.226 | 130364 | 79829 | 1959.3 | n/a |
-| vector | own-knn | 100000 | 1.032 | 47.001 | 21.27 | 1.000 | n/a | 0 | 0 | 1959.3 | n/a |
-| texto | pg-gin | 100000 | 95.815 | 38.467 | 25.95 | n/a | n/a | n/a | n/a | n/a | 37.52 |
-| vector | pg-ivfflat | 100000 | 15.148 | 2.694 | 338.36 | 0.260 | n/a | n/a | n/a | n/a | 112.06 |
-| vector | pg-hnsw | 100000 | 282.946 | 4.117 | 233.07 | 0.815 | n/a | n/a | n/a | n/a | 130.24 |
+| texto | own-inverted | 100000 | 313.122 | 67.968 | 14.71 | n/a | 0.058 | 259656 | 158682 | 3441.4 | n/a |
+| vector | own-knn | 100000 | 23.990 | 8.279 | 120.75 | 0.840 | n/a | 98185 | 98185 | 3441.4 | n/a |
+| texto | pg-gin | 100000 | 75.888 | 33.184 | 30.10 | n/a | n/a | n/a | n/a | n/a | 37.46 |
+| vector | pg-ivfflat | 100000 | 15.641 | 1.534 | 577.17 | 0.735 | n/a | n/a | n/a | n/a | 112.06 |
+| vector | pg-hnsw | 100000 | 34.826 | 1.284 | 710.21 | 0.850 | n/a | n/a | n/a | n/a | 21.16 |
 
 Los plots cubren los tres tamaños hasta 100K e incluyen la curva de HNSW:
 
@@ -899,22 +913,25 @@ latencia por query y se invocan desde `experiments/run_benchmarks.py`.
 
 Qué se midió y qué se concluye con la corrida de 1K, 10K y 100K chunks:
 
-- **Texto:** la ventaja del inverted index propio se diluye al crecer N. En
-  N=1000 responde en 0.236 ms contra 1.490 ms de GIN, en N=10000 ya están
-  parejos (4.020 ms contra 4.169 ms) y en N=100000 quedan empatados en la
-  práctica: 34.900 ms y 28.64 qps propios contra 38.467 ms y 25.95 qps de
-  GIN. El costo oculto del engine propio es la memoria: el proceso llega a un
-  pico de 1959.3 MB de RSS en la carga de 100K, mientras el índice GIN ocupa
-  37.52 MB dentro del servidor. En build, GIN gana claro: 95.8 s contra
-  310.7 s.
-- **Vectores:** en N=100000 cada técnica gana una métrica distinta. IVFFlat es
-  el más rápido (2.694 ms, 338 qps) y el más barato de construir (15.1 s),
-  pero recupera poco (recall 0.260). El KNN propio recupera todo (recall
-  1.000) pero su costo crece lineal con N (47.001 ms, 21 qps). HNSW queda en
-  el punto medio con 4.117 ms y recall 0.815, pagando el build más caro
-  (282.9 s) y el índice más grande (130.24 MB).
-- **I/O:** solo el engine propio expone `disk_reads`/`disk_writes` propios. En
-  PostgreSQL el I/O queda dentro del servidor y se compara por latencia.
+- **Texto:** la ventaja del inverted index propio se invierte al crecer N. En
+  N=1000 responde en 0.287 ms contra 0.929 ms de GIN, en N=10000 GIN ya gana
+  (2.562 ms contra 5.868 ms) y en N=100000 GIN duplica al engine propio:
+  33.184 ms y 30.10 qps contra 67.968 ms y 14.71 qps. El costo oculto del
+  engine propio es la memoria: el proceso llega a un pico de 3441.4 MB de RSS
+  en la carga de 100K (incluida la preparación de histogramas del mismo
+  proceso), mientras el índice GIN ocupa 37.46 MB dentro del servidor. En
+  build, GIN gana claro: 75.9 s contra 313.1 s.
+- **Vectores:** sobre histogramas reales los índices ANN de pgvector dominan
+  en N=100000. HNSW es el más rápido (1.284 ms, 710 qps) con recall 0.850 y
+  el índice más chico (21.16 MB). IVFFlat queda cerca (1.534 ms, 577 qps,
+  recall 0.735) y es el más barato de construir (15.6 s). El KNN propio ya no
+  garantiza el top-10 exacto que mostraba con vectores sintéticos: recall
+  0.840 con 8.279 ms y 121 qps, porque con histogramas reales la poda por
+  visual words sí filtra candidatos en lugar de caer al scan completo.
+- **I/O:** solo el engine propio expone `disk_reads`/`disk_writes` propios, y
+  desde esta corrida el KNN propio también los reporta (98185 escrituras en
+  100K por la persistencia paginada de su snapshot). En PostgreSQL el I/O
+  queda dentro del servidor y se compara por latencia.
 
 ### ¿Se recuperó la misma información?
 
@@ -922,27 +939,32 @@ Es la pregunta explícita de la especificación. Se responde con recall@10
 contra el scan lineal exacto (vectores) y con el overlap Jaccard del top-10
 contra GIN (texto), sobre las mismas consultas:
 
-- **KNN propio: sí.** Recall 1.000 en los tres tamaños: devuelve exactamente
-  el mismo top-10 que la fuerza bruta, porque la poda por visual words cae a
-  scan completo cuando no junta candidatos suficientes. El precio es la
-  latencia: 47.001 ms por consulta en N=100000.
-- **HNSW: casi.** Recall 0.995 (N=1000), 0.970 (N=10000) y 0.815 (N=100000):
+- **KNN propio: casi.** Recall 0.965 (N=1000), 0.995 (N=10000) y 0.840
+  (N=100000). Con histogramas reales la poda por visual words sí junta
+  candidatos suficientes y deja de caer al scan completo que con vectores
+  sintéticos garantizaba recall 1.000: gana latencia (8.279 ms en N=100000)
+  a cambio de perder parte del top-10 exacto.
+- **HNSW: casi.** Recall 0.985 (N=1000), 0.980 (N=10000) y 0.850 (N=100000):
   pierde fidelidad al crecer la colección a cambio de latencia casi plana
-  (4.117 ms en N=100000).
-- **IVFFlat: no.** Recall entre 0.200 y 0.260 con `probes` en su valor por
-  defecto (1): explora una sola de las 100 listas y deja fuera unas tres
-  cuartas partes del top-10 verdadero. Es el trade-off documentado de IVF:
-  subir `probes` sube recall y latencia a la vez.
-- **Texto: parcialmente.** Overlap Jaccard de 0.309 (N=1000), 0.067 (N=10000)
-  y 0.226 (N=100000). No hay ground truth neutral en texto: el engine propio
-  aplica stopwords y stemming de NLTK con ranking TF-IDF coseno, y GIN usa la
-  configuración `english` de PostgreSQL con `ts_rank`, así que ambos devuelven
-  documentos relevantes para los mismos términos pero no los mismos diez.
+  (1.284 ms en N=100000).
+- **IVFFlat: parcialmente.** Recall 0.420 (N=1000), 0.585 (N=10000) y 0.735
+  (N=100000) con `probes` en su valor por defecto (1): mucho mejor que el
+  0.200 a 0.260 que daba con vectores sintéticos dispersos, porque los
+  histogramas reales forman clusters que las listas invertidas de IVF sí
+  capturan. Sigue el trade-off documentado: subir `probes` sube recall y
+  latencia a la vez.
+- **Texto: poco.** Overlap Jaccard de 0.194 (N=1000), 0.096 (N=10000) y
+  0.058 (N=100000). No hay ground truth neutral en texto: el engine propio
+  aplica stopwords y stemming de NLTK con ranking TF-IDF coseno sobre el
+  vocabulario top-8000, y GIN usa la configuración `english` de PostgreSQL
+  con `ts_rank` sobre el vocabulario completo, así que ambos devuelven
+  documentos relevantes para los mismos términos pero no los mismos diez, y
+  la poda top-k del lado propio reduce el acuerdo todavía más.
 
-En resumen, para N=100000: IVFFlat gana latencia y throughput vectorial,
-el KNN propio gana recall, HNSW gana el equilibrio recall-latencia, GIN gana
-build y memoria en texto, y la latencia de consulta textual termina pareja
-entre el engine propio y GIN.
+En resumen, para N=100000: HNSW gana el equilibrio vectorial (latencia
+mínima, recall 0.850 y el índice más chico), IVFFlat gana el build, el KNN
+propio queda con recall comparable pero latencia mayor, y en texto GIN gana
+build, memoria y también latencia de consulta.
 
 ![Recall@10 contra el scan lineal exacto](multimodal-db/experiments/results/recall_vector.png)
 
@@ -1017,4 +1039,4 @@ plan.
   semánticas daría fragmentos con mejor cohesión que la ventana fija.
 - **Curva recall-latencia de IVFFlat:** repetir la matriz de benchmarks (1K,
   10K y 100K) variando `probes` para mapear el trade-off completo, en vez del
-  punto único con el valor por defecto (recall 0.260 en N=100000).
+  punto único con el valor por defecto (recall 0.735 en N=100000).

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -192,10 +193,12 @@ def _throughput_qps(query_count: int, wall_s: float) -> float:
 
 
 # Pico de memoria del proceso en MB
+# En macOS el contador viene en bytes y en Linux en kilobytes
 def process_peak_rss_mb() -> float:
     if resource is None:
         return 0.0
-    return round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
+    divisor = 1024 * 1024 if sys.platform == "darwin" else 1024
+    return round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / divisor, 1)
 
 
 # Calcula el top k real comparando cada consulta contra toda la colección
