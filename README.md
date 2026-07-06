@@ -60,7 +60,7 @@ gantt
 ## 2. Requisitos
 
 Lo listado aquí está implementado y es verificable contra el código actual.
-Lo único aspiracional se marca como pendiente.
+Lo que falta se marca como pendiente.
 
 ### Funcionales
 
@@ -147,7 +147,7 @@ Medidas sobre la copia local de `data/`:
 | Audio features | 12 columnas estandarizadas (media ~0, desviación ~1) |
 | Covers JPG | 17706 (960 MB) |
 | Canciones con cover | 17706 de 18194 (97.3 %) |
-| Archivos de audio crudo | 0 descargados por defecto (FMA small opcional: 8000) |
+| Archivos de audio crudo | 0 descargados por defecto (FMA small opcional: 8002 verificados por SHA1) |
 
 - Los dos CSV cubren exactamente las mismas 18194 canciones: letra, features y
   cover cruzan uno a uno por `track_id`.
@@ -156,7 +156,8 @@ Medidas sobre la copia local de `data/`:
   desde el CSV.
 - No hay audio crudo descargado por defecto: la modalidad audio se ejercita
   con las features del CSV y los WAV sintéticos del seed. El flujo opcional
-  FMA (`tests/download_data.py --only fma`) agrega 8000 clips mp3 reales.
+  FMA (`tests/download_data.py --only fma`) agrega 8002 clips mp3 reales,
+  ejecutado y documentado en la sección 9, Idea 2.
 
 ## 4. Arquitectura
 
@@ -360,7 +361,7 @@ Spotify usa k=8000, elegido midiendo con el preprocessor real la cobertura
 acumulada de ocurrencias sobre las letras del corpus (k=5000 cubre 92.7 %,
 k=8000 cubre 95.1 %, k=10000 cubre 96.0 %); 8000 es el menor múltiplo de 1000
 que supera el 95 %. Con eso las aplicaciones dejan el vocabulario completo
-(71725 términos) y pasan al top-k que define la especificación. Un
+(71725 términos) y pasan a un top-k acotado. Un
 `CREATE INDEX` sin `WITH` mantiene el vocabulario completo.
 
 ### MultimediaKNN
@@ -560,6 +561,34 @@ ejecutado.
 
 ![Resultado de KNN de audio con el audio player](docs/img/ui_knn_audio.png)
 
+#### Corrida real con audio FMA
+
+Corrida verificada con música real, no con los WAV sintéticos del seed:
+
+```bash
+cd multimodal-db
+PYTHONPATH=. python tests/download_data.py --only fma
+PYTHONPATH=. python tests/import_demo.py --dataset fma --limit 200
+```
+
+Descarga: `fma_metadata.zip` y `fma_small.zip` verificados por SHA1 contra los
+valores oficiales, 8002 clips mp3 extraídos a `data/fma/audio/`. Import con
+`--limit 200`, salida real de la corrida:
+
+```
+tabla: fma_tracks
+filas: 200 lotes: 1
+índices: ['id:hash', 'audio:knn']
+knn audio: [(('000002.mp3', 1.0),), (('000718.mp3', 0.7857136130332947),), (('000625.mp3', 0.7224134802818298),)]
+```
+
+La consulta usa como ejemplo el propio `000002.mp3` ("Food" de AWOL, `track_id`
+2, género Hip-Hop). El primer vecino es la misma pista (score 1.0, MFCC contra
+sí misma), y le siguen `000718.mp3` ("Song Of The Spindle Berry" de Fursaxa,
+`track_id` 718, score 0.786, género Folk) y `000625.mp3` ("Climbing To The
+Top" de Ed Askew, `track_id` 625, score 0.722, también Folk). `FMALoader`
+resuelve `title`, `artist` y `genre` directo desde `tracks.csv`.
+
 ### Idea 4: Recomendación Multimodal
 
 Es la recomendación clásica de catálogo: si te gusta este álbum, cuáles otros
@@ -624,8 +653,8 @@ Variables opcionales (con sus valores por defecto):
   como alternativa liviana sin base de datos).
 - `POSTGRES_USER=mmdb`, `POSTGRES_PASSWORD=mmdb`, `POSTGRES_DB=multimodal`.
 
-Con el default `postgres` la corrida estándar demuestra la persistencia que
-pide la especificación: el motor guarda sus páginas y su catálogo en el schema
+Con el default `postgres` la corrida estándar deja ver la persistencia real:
+el motor guarda sus páginas y su catálogo en el schema
 `engine` de PostgreSQL, así que el estado sobrevive reinicios del backend
 (`docker compose restart backend`).
 
@@ -765,7 +794,7 @@ cd multimodal-db
 pytest tests/
 ```
 
-La suite incluye contract tests parametrizados por puerto (storage, buffer,
+Los tests incluyen contract tests parametrizados por puerto (storage, buffer,
 índices, extractores, codebook), unit tests del query processor y un smoke de
 integración que va del SQL al índice real y de ahí al storage. Los cuatro
 tests de integración contra
@@ -787,9 +816,10 @@ Definición operacional de cada métrica y dónde se mide:
   resultados del índice que también están en los k de fuerza bruta, dividido
   entre k, con el scan lineal exacto (coseno con numpy contra toda la
   colección) como ground truth. El benchmark lo mide automáticamente para el
-  KNN propio, IVFFlat y HNSW (columna `recall_at_k`). El diseño lo resguarda:
-  `MultimediaKNN` cae a scan completo cuando el filtro por visual words deja
-  pocos candidatos, garantizando resultados exactos a costa de latencia.
+  KNN propio, IVFFlat y HNSW (columna `recall_at_k`). Esto se evita por
+  diseño: `MultimediaKNN` cae a scan completo cuando el filtro por visual
+  words deja pocos candidatos, así los resultados salen exactos a costa de
+  latencia.
 - **Overlap textual:** similitud de Jaccard promedio entre el top-k del
   inverted index propio y el top-k de GIN con `ts_rank` para las mismas
   consultas (columna `overlap_at_k`). No hay ground truth neutral en texto
@@ -935,9 +965,8 @@ Qué se midió y qué se concluye con la corrida de 1K, 10K y 100K chunks:
 
 ### ¿Se recuperó la misma información?
 
-Es la pregunta explícita de la especificación. Se responde con recall@10
-contra el scan lineal exacto (vectores) y con el overlap Jaccard del top-10
-contra GIN (texto), sobre las mismas consultas:
+Se responde con recall@10 contra el scan lineal exacto (vectores) y con el
+overlap Jaccard del top-10 contra GIN (texto), sobre las mismas consultas:
 
 - **KNN propio: casi.** Recall 0.965 (N=1000), 0.995 (N=10000) y 0.840
   (N=100000). Con histogramas reales la poda por visual words sí junta
@@ -999,7 +1028,7 @@ plan.
   memoria, y en vectores gana recall (1.000 contra el scan exacto) pero pierde
   latencia contra IVFFlat y HNSW al crecer N.
 
-### Limitaciones reales detectadas en las auditorías
+### Limitaciones detectadas
 
 - **R-Tree no es implementación propia:** envuelve la librería `rtree`
   (libspatialindex). Reescribirlo desde cero con manejo de páginas es la deuda
@@ -1007,8 +1036,10 @@ plan.
 - **Audio real solo vía FMA:** el dataset del profesor no trae archivos de
   audio crudo, así que `MFCCExtractor` se ejercita con los WAV sintéticos del
   seed o con el corpus opcional FMA small que descarga
-  `tests/download_data.py --only fma`. Las corridas y capturas registradas en
-  este README todavía no incluyen esa carga.
+  `tests/download_data.py --only fma`. La corrida real (8002 clips
+  descargados, 200 importados, búsqueda KNN de audio exitosa con
+  `title`/`artist`/`genre` resueltos) ya está documentada en la sección 9,
+  Idea 2.
 - **Sin heap table:** las filas viven solo en los índices. Un `INSERT` sobre una
   tabla sin índice no persiste datos. Falta un heap file de tabla como
   estructura base.

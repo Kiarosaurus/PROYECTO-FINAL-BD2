@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 from typing import Iterator
@@ -65,16 +66,13 @@ def _write_fma_fixture(folder: Path) -> tuple[Path, Path]:
     _write_sine_wav(nested / "000002.wav", freq=880.0)
     _write_sine_wav(nested / "000005.wav", freq=3520.0)
     tracks = folder / "tracks.csv"
-    tracks.write_text(
-        ",album,artist,track,track\n"
-        ",title,name,title,genre_top\n"
-        "track_id,,,,\n"
-        "1,Album A,Artist A,Low Tone,Rock\n"
-        "2,Album B,Artist B,Mid Tone,Jazz\n"
-        "5,Album C,Artist C,High Tone,Electronic\n"
-        "9,Album D,Artist D,Missing,Pop\n",
-        encoding="utf-8",
-    )
+    with open(tracks, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["track_id", "album_title", "artist_name", "track_title", "track_genres"])
+        writer.writerow(["1", "Album A", "Artist A", "Low Tone", "[{'genre_id': '1', 'genre_title': 'Rock'}]"])
+        writer.writerow(["2", "Album B", "Artist B", "Mid Tone", "[{'genre_id': '2', 'genre_title': 'Jazz'}]"])
+        writer.writerow(["5", "Album C", "Artist C", "High Tone", "[{'genre_id': '3', 'genre_title': 'Electronic'}]"])
+        writer.writerow(["9", "Album D", "Artist D", "Missing", "[{'genre_id': '4', 'genre_title': 'Pop'}]"])
     return tracks, audio
 
 

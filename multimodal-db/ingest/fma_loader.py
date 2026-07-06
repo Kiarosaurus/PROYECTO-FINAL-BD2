@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import csv
 from pathlib import Path
 from typing import Iterator
@@ -47,24 +48,34 @@ class FMALoader(DatasetLoader):
             yield (
                 row_id,
                 str(track_id),
-                fields.get("track.title", ""),
-                fields.get("artist.name", ""),
-                fields.get("track.genre_top", ""),
+                fields.get("track_title", ""),
+                fields.get("artist_name", ""),
+                self._top_genre(fields.get("track_genres", "")),
                 audio,
             )
 
-    # El csv de FMA trae dos filas de encabezado y una de marcador
+    # El csv de FMA trae una sola fila de encabezado con nombres de columna planos
     def _metadata(self) -> Iterator[tuple[int, dict[str, str]]]:
         with open(self._tracks_csv, newline="", encoding="utf-8") as handle:
-            reader = csv.reader(handle)
-            top = next(reader)
-            sub = next(reader)
-            next(reader)
-            names = [f"{a}.{b}" if a and b else (a or b) for a, b in zip(top, sub)]
+            reader = csv.DictReader(handle)
             for row in reader:
-                if not row or not row[0].strip():
+                track_id = row.get("track_id", "").strip()
+                if not track_id:
                     continue
-                yield int(row[0]), dict(zip(names, row))
+                yield int(track_id), row
+
+    # La columna track_genres trae una lista serializada de géneros, se usa el primero
+    @staticmethod
+    def _top_genre(raw: str) -> str:
+        if not raw:
+            return ""
+        try:
+            genres = ast.literal_eval(raw)
+        except (ValueError, SyntaxError):
+            return ""
+        if not genres:
+            return ""
+        return genres[0].get("genre_title", "")
 
     # Busca el archivo del track en la estructura de carpetas de FMA
     def _audio_for(self, track_id: int) -> str | None:
