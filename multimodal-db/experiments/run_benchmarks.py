@@ -221,8 +221,10 @@ def bench_own_text(documents: list[str], queries: list[str], workdir: Path) -> t
     return row, retrieved
 
 
-def bench_own_knn(vectors: np.ndarray, queries: np.ndarray) -> tuple[dict, list[set[str]]]:
-    index = MultimediaKNNIndex()
+def bench_own_knn(vectors: np.ndarray, queries: np.ndarray, workdir: Path) -> tuple[dict, list[set[str]]]:
+    storage = FileStorageEngine(workdir)
+    buffer = LRUBufferManager(storage, capacity=256)
+    index = MultimediaKNNIndex(buffer=buffer, file_id="bench_knn")
     start = time.perf_counter()
     index.build([(str(i), vector) for i, vector in enumerate(vectors)])
     build_s = round(time.perf_counter() - start, 3)
@@ -235,14 +237,15 @@ def bench_own_knn(vectors: np.ndarray, queries: np.ndarray) -> tuple[dict, list[
         latencies.append((time.perf_counter() - t0) * 1000)
         retrieved.append({str(key) for key, _score in result.records})
     wall_s = time.perf_counter() - batch_start
+    stats = storage.stats()
     row = {
         "modality": "vector",
         "engine": "own-knn",
         "size": len(vectors),
         "build_s": build_s,
         "avg_query_ms": _average_ms(latencies),
-        "disk_reads": 0,
-        "disk_writes": 0,
+        "disk_reads": stats.disk_reads,
+        "disk_writes": stats.disk_writes,
         "throughput_qps": _throughput_qps(len(queries), wall_s),
         "rss_mb": process_peak_rss_mb(),
     }
@@ -358,7 +361,8 @@ def run_benchmarks(
         with tempfile.TemporaryDirectory() as workdir:
             text_row, own_text_top = bench_own_text(documents, text_queries, Path(workdir))
         rows.append(text_row)
-        knn_row, own_knn_top = bench_own_knn(vectors, vector_queries)
+        with tempfile.TemporaryDirectory() as workdir:
+            knn_row, own_knn_top = bench_own_knn(vectors, vector_queries, Path(workdir))
         knn_row["recall_at_k"] = recall_at_k(own_knn_top, truth)
         rows.append(knn_row)
         if dsn:

@@ -777,7 +777,12 @@ dimensiones normalizados (misma dimensión que la columna `vector(256)` de
 
 Para cada tamaño de carga mide tiempo de build, latencia promedio, throughput,
 recall@10 contra el scan lineal exacto, overlap textual contra GIN, pico de
-RSS del proceso y el I/O real del storage para el engine propio. Con
+RSS del proceso y el I/O real del storage para el engine propio. En el caso
+del KNN propio, el build persiste el snapshot del índice por páginas vía el
+`BufferManager` sobre un `FileStorageEngine` temporal, así que `disk_reads` y
+`disk_writes` reflejan el I/O real de esa persistencia. La asimetría restante
+es que la búsqueda se resuelve sobre la matriz en memoria y no agrega I/O por
+consulta. Con
 `POSTGRES_DSN` definido agrega las mediciones contra GIN, pgvector IVFFlat y
 pgvector HNSW (más `pg_relation_size` de cada índice nativo). Como la tabla
 `compare.media` puede tener dos índices ANN, el benchmark deja activo solo el

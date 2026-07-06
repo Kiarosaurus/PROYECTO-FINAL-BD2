@@ -83,6 +83,20 @@ def test_benchmark_own_text_reports_real_disk_io(tmp_path: Path) -> None:
     assert text_row["disk_writes"] > 0
 
 
+def test_benchmark_own_knn_reports_real_disk_io(tmp_path: Path) -> None:
+    rows = run_benchmarks(
+        sizes=[20],
+        query_count=2,
+        out_dir=tmp_path,
+        seed=1,
+        dsn=None,
+        make_plots=False,
+    )
+
+    knn_row = next(row for row in rows if row["engine"] == "own-knn")
+    assert knn_row["disk_writes"] > 0
+
+
 def test_dataset_generators_are_deterministic() -> None:
     first = make_documents(5, np.random.default_rng(3))
     second = make_documents(5, np.random.default_rng(3))
