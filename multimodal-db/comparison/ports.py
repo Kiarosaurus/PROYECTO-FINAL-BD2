@@ -11,8 +11,6 @@ class BenchmarkResult:
     records: list[Any] = field(default_factory=list)
     # Tiempo de consulta en milisegundos
     latency_ms: float = 0.0
-    # Uso de memoria en bytes
-    memory_bytes: int = 0
 
 
 # Motor de comparación contra índices nativos de PostgreSQL

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-import tracemalloc
 from typing import Any, Literal
 
 import psycopg2
@@ -54,16 +53,12 @@ class PostgresGINEngine(ComparisonEngine):
             LIMIT 10
         """
         conn = self._conn()
-        tracemalloc.start()
         t0 = time.perf_counter()
         with conn, conn.cursor() as cur:
             cur.execute(sql, (str(q),))
             rows = cur.fetchall()
         latency_ms = (time.perf_counter() - t0) * 1000
-        _, peak = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
         return BenchmarkResult(
             records=rows,
             latency_ms=round(latency_ms, 3),
-            memory_bytes=peak,
         )
