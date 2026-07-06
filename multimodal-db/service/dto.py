@@ -33,6 +33,8 @@ class Schema:
 class IndexInfo:
     column: str
     index_type: str
+    # Ajustes con los que se creó el índice
+    options: dict = field(default_factory=dict)
 
 
 # Datos de una tabla y sus índices

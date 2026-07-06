@@ -6,8 +6,30 @@ from core.metrics import IOStats
 
 from query.parser import ast as A
 from query.ports import Parser, Planner, Executor
-from query.plan_types import ResultSet
+from query.plan_types import PlanOp, QueryPlan, ResultSet
 from service.dto import ColumnSpec, Schema
+
+
+# Repone en el executor las tablas y los índices que el catálogo recuerda
+# Cada índice recreado vuelve a cargar su snapshot desde el storage
+def rehydrate_executor(executor: Executor, catalog: Any) -> None:
+    for table in catalog.list_tables():
+        info = catalog.get_table(table)
+        columns = info.schema.column_names()
+        types = [col.type for col in info.schema.columns]
+        executor.execute(
+            QueryPlan(op=PlanOp.CREATE_TABLE, table=table, columns=columns, column_types=types)
+        )
+        for index in info.indexes:
+            executor.execute(
+                QueryPlan(
+                    op=PlanOp.CREATE_INDEX,
+                    table=table,
+                    columns=[index.column],
+                    index_type=index.index_type,
+                    index_options=dict(index.options),
+                )
+            )
 
 
 # Atiende las consultas de una sola conexión
@@ -54,7 +76,7 @@ class Session:
         elif isinstance(ast, A.CreateIndex) and self._catalog.has_table(ast.table):
             info = self._catalog.get_table(ast.table)
             if info.schema.type_of(ast.column) is not None:
-                self._catalog.add_index(ast.table, ast.column, ast.index_type)
+                self._catalog.add_index(ast.table, ast.column, ast.index_type, dict(ast.options))
 
     @property
     def io(self) -> IOStats:

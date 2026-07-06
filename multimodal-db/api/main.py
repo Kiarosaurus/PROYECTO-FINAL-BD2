@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.models import ErrorResponse
+from core.buffer.lru_buffer import LRUBufferManager
 from core.ports.storage import StorageEngine
 from core.storage.file_engine import FileStorageEngine
 from query.parser.sql_parser import SqlParser
@@ -18,6 +19,7 @@ from query.planner import QueryPlanner
 from query.executor import QueryExecutor
 from query.index_factory import EngineIndexFactory
 from service.catalog import Catalog
+from service.session import rehydrate_executor
 
 # Rutas que se cargan solo si su módulo está presente
 _ROUTE_MODULES = [
@@ -121,7 +123,10 @@ def create_app() -> FastAPI:
     storage = _build_storage()
     factory = EngineIndexFactory(media_resolver=_build_media_resolver(upload_dir, storage))
     app.state.executor = QueryExecutor(factory, storage)
-    app.state.catalog = Catalog()
+    # El catálogo guarda sus tablas en el mismo storage del engine
+    app.state.catalog = Catalog(buffer=LRUBufferManager(storage))
+    # Al arrancar se reponen las tablas y los índices ya creados
+    rehydrate_executor(app.state.executor, app.state.catalog)
 
     @app.exception_handler(StarletteHTTPException)
     async def on_http_error(request, exc: StarletteHTTPException) -> JSONResponse:
