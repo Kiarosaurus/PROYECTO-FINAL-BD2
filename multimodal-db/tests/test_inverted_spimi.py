@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from indices.inverted.spimi_builder import SPIMIBlockBuilder
+from indices.inverted.text_chunker import TextChunker
 from indices.inverted.text_index import InvertedIndex
 from indices.inverted.text_preprocessor import TextPreprocessor
 from indices.ports import EqualityPredicate, TextMatchPredicate
@@ -199,6 +200,31 @@ def test_inverted_index_chunks_multiparagraph_document_and_dedupes_parent() -> N
     assert [record["id"] for record in result.records] == [1, 3]
     assert "1#1" in ranked_chunks
     assert "1#2" in ranked_chunks
+
+
+def test_inverted_index_windows_long_single_line_document_and_dedupes_parent() -> None:
+    index = InvertedIndex(
+        column="body",
+        block_document_limit=2,
+        chunker=TextChunker(window_words=3),
+    )
+    index.build(
+        [
+            {
+                "id": 1,
+                "body": "visual search ranking storage layout basics visual search quality",
+            },
+            {"id": 2, "body": "audio codecs"},
+        ]
+    )
+
+    result = index.search(TextMatchPredicate(column="body", terms="visual search"))
+    ranked_chunks = [chunk_id for chunk_id, _score in index.rank("visual search")]
+
+    assert index.postings_for("visual") == {"1#0": 1, "1#2": 1}
+    assert "1#0" in ranked_chunks
+    assert "1#2" in ranked_chunks
+    assert [record["id"] for record in result.records] == [1]
 
 
 def test_inverted_index_single_paragraph_keeps_plain_doc_ids() -> None:

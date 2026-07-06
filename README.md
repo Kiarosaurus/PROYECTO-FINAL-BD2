@@ -315,6 +315,12 @@ con NLTK, con un fallback de reglas si NLTK no está disponible
 (`indices/inverted/text_preprocessor.py`). Los postings persisten streameados en
 páginas de 4096 bytes, no como un blob único.
 
+Antes de indexar, cada documento se corta en chunks por párrafos
+(`indices/inverted/text_chunker.py`); si el texto no trae párrafos y supera la
+ventana (100 palabras por defecto), un fallback lo corta en ventanas
+consecutivas de ese tamaño sin solapamiento. La búsqueda devuelve cada
+documento padre una sola vez con el score de su mejor chunk.
+
 ### MultimediaKNN
 
 Guarda un histograma por objeto y una inverted list por visual word. La búsqueda
@@ -759,8 +765,9 @@ Definición operacional de cada métrica y dónde se mide:
 `experiments/run_benchmarks.py` usa como corpus de texto las letras reales de
 `data/lyrics/lyrics_dataset.csv` (descargadas con `tests/download_data.py`).
 Las consultas se arman con palabras tomadas de los propios documentos. El
-corpus real tiene 18194 letras (una por chunk: las letras del CSV no traen
-saltos de párrafo dobles), así que para la carga de 100K el benchmark completa
+corpus real tiene 18194 letras (sin saltos de párrafo dobles: el fallback del
+chunker las corta en ventanas de 100 palabras y una letra larga aporta varios
+chunks), así que para la carga de 100K el benchmark completa
 los documentos faltantes con muestreo con reemplazo sobre las mismas letras
 reales, cada copia con id propio. Con `--synthetic`, o si el CSV no existe,
 cae al corpus sintético determinista (seed fija): documentos de 20 palabras
@@ -952,10 +959,9 @@ plan.
 - **Pesos adaptativos en la fusión híbrida:** el RRF de `query/fusion.py`
   pondera ambas modalidades por igual. Exponer el peso en el SQL o aprenderlo
   por consulta afinaría el ranking de `HYBRID`.
-- **Chunking semántico:** el chunker corta por párrafos y las letras del
-  dataset llegan como un solo chunk porque no traen saltos de párrafo dobles.
-  Cortar por ventanas de tokens o por estrofas habilitaría recuperación a
-  nivel de fragmento.
+- **Chunking semántico:** el chunker corta por párrafos y, si no los hay,
+  por ventanas fijas de 100 palabras. Cortar por estrofas o por unidades
+  semánticas daría fragmentos con mejor cohesión que la ventana fija.
 - **Curva recall-latencia de IVFFlat:** repetir la matriz de benchmarks (1K,
   10K y 100K) variando `probes` para mapear el trade-off completo, en vez del
   punto único con el valor por defecto (recall 0.260 en N=100000).
