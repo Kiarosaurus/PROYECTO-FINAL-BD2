@@ -44,6 +44,25 @@ def test_recall_at_k_with_exact_ground_truth_minimal() -> None:
     assert recall_at_k([{"0"}, {"1"}, {"9"}], truth) == round(2 / 3, 3)
 
 
+def test_small_corpus_is_amplified_by_resampling(tmp_path: Path) -> None:
+    lyrics_csv = tmp_path / "lyrics.csv"
+    lyrics_csv.write_text(
+        "track_id,lyrics\na,uno dos tres cuatro\nb,cinco seis siete ocho\n",
+        encoding="utf-8",
+    )
+    rows = run_benchmarks(
+        sizes=[8],
+        query_count=2,
+        out_dir=tmp_path,
+        seed=5,
+        dsn=None,
+        make_plots=False,
+        lyrics_csv=lyrics_csv,
+    )
+
+    assert all(row["size"] == 8 for row in rows)
+
+
 def test_jaccard_overlap_minimal() -> None:
     assert jaccard_overlap([{"a", "b"}], [{"a", "b"}]) == 1.0
     assert jaccard_overlap([{"a", "b"}], [{"a", "c"}]) == round(1 / 3, 3)

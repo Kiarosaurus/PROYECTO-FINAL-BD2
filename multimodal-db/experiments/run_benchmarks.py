@@ -43,7 +43,7 @@ CSV_COLUMNS = [
 ]
 
 # Ruta por defecto del CSV de letras descargado de Drive
-LYRICS_CSV = Path(__file__).resolve().parents[2] / "data" / "raw" / "lyrics" / "lyrics_dataset.csv"
+LYRICS_CSV = Path(__file__).resolve().parents[2] / "data" / "lyrics" / "lyrics_dataset.csv"
 
 
 # Genera un vocabulario sintético con palabras que el preprocessor no descarta
@@ -341,6 +341,10 @@ def run_benchmarks(
     for size in sizes:
         if corpus:
             documents = corpus[:size]
+            # Si el corpus real no alcanza se completa con muestreo con reemplazo
+            if len(documents) < size:
+                extra = rng.integers(0, len(corpus), size - len(documents))
+                documents = documents + [corpus[int(i)] for i in extra]
             text_queries = queries_from_documents(documents, query_count, rng)
         else:
             documents = make_documents(size, rng)

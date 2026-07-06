@@ -18,7 +18,7 @@ from service.session import Session
 
 # Raíz local de la data del proyecto
 DATA_ROOT = Path(
-    os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[2] / "data" / "raw"))
+    os.environ.get("DATA_DIR", str(Path(__file__).resolve().parents[2] / "data"))
 )
 
 

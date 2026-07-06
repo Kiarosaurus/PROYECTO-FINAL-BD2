@@ -11,5 +11,6 @@ engine_data/
 # dataset local descargado de Drive
 data/**
 !data/.gitkeep
-!data/raw/
-!data/raw/.gitkeep
+
+# corridas locales del benchmark
+multimodal-db/experiments/results/local/
